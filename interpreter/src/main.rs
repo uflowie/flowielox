@@ -34,7 +34,30 @@ fn run(program: &str) {
 }
 
 fn get_tokens(program: &str) -> Result<Vec<Token>, ScanningError> {
-    Ok(vec![])
+    let mut tokens = vec![];
+    let mut start = 0;
+    let mut line = 1;
+    let mut curr = 0;
+    let chars: Vec<char> = program.chars().collect();
+
+    while curr < chars.len() {
+        let token = match chars[curr] {
+            '(' => Token::LeftParen,
+            ')' => Token::RightParen,
+            '{' => Token::LeftBrace,
+            '}' => Token::RightBrace,
+            ',' => Token::Comma,
+            '.' => Token::Dot,
+            '-' => Token::Minus,
+            '+' => Token::Plus,
+            ';' => Token::Semicolon,
+            '*' => Token::Star,
+            _ => Token::EOF,
+        };
+    }
+
+    tokens.push(Token::EOF);
+    Ok(tokens)
 }
 
 enum Token {
