@@ -1,4 +1,6 @@
 use std::{env::args, fs::read_to_string, io::stdin};
+mod scanning;
+use scanning::get_tokens;
 
 fn main() {
     let args: Vec<_> = args().collect();
@@ -31,93 +33,6 @@ fn run_prompt() {
 
 fn run(program: &str) {
     println!("{}", program);
+    let tokens = get_tokens(program);
 }
 
-fn get_tokens(program: &str) -> Result<Vec<Token>, ScanningError> {
-    let mut tokens = vec![];
-    let mut start = 0;
-    let mut line = 1;
-    let mut curr = 0;
-    let chars: Vec<char> = program.chars().collect();
-
-    while curr < chars.len() {
-        let token = match chars[curr] {
-            '(' => Some(Token::LeftParen),
-            ')' => Some(Token::RightParen),
-            '{' => Some(Token::LeftBrace),
-            '}' => Some(Token::RightBrace),
-            ',' => Some(Token::Comma),
-            '.' => Some(Token::Dot),
-            '-' => Some(Token::Minus),
-            '+' => Some(Token::Plus),
-            ';' => Some(Token::Semicolon),
-            '*' => Some(Token::Star),
-            '!' | '=' | '<' | '>' => {
-                curr += 1;
-                let token = match (chars[curr - 1], chars.get(curr)) {
-                    ('!', Some('=')) => Token::BangEqual,
-                    ('!', _) => Token::Bang,
-                    ('=', Some('=')) => Token::EqualEqual,
-                    ('=', _) => Token::Equal,
-                    ('<', Some('=')) => Token::LessEqual,
-                    ('<', _) => Token::Less,
-                    ('>', Some('=')) => Token::GreaterEqual,
-                    ('>', _) => Token::Greater,
-                }
-                Some(token)
-            }
-            _ => {
-                println!("error on line {}", line);
-                None
-            }
-        };
-        curr += 1;
-    }
-
-    tokens.push(Token::EOF);
-    Ok(tokens)
-}
-
-enum Token {
-    LeftParen,
-    RightParen,
-    LeftBrace,
-    RightBrace,
-    Comma,
-    Dot,
-    Minus,
-    Plus,
-    Semicolon,
-    Slash,
-    Star,
-    Bang,
-    BangEqual,
-    Equal,
-    EqualEqual,
-    Greater,
-    GreaterEqual,
-    Less,
-    LessEqual,
-    Identifier(String),
-    String(String),
-    Number(i64),
-    And,
-    Class,
-    Else,
-    False,
-    Fun,
-    For,
-    If,
-    Nil,
-    Or,
-    Print,
-    Return,
-    Super,
-    This,
-    True,
-    Var,
-    While,
-    EOF,
-}
-
-enum ScanningError {}
