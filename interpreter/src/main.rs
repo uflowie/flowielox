@@ -42,18 +42,36 @@ fn get_tokens(program: &str) -> Result<Vec<Token>, ScanningError> {
 
     while curr < chars.len() {
         let token = match chars[curr] {
-            '(' => Token::LeftParen,
-            ')' => Token::RightParen,
-            '{' => Token::LeftBrace,
-            '}' => Token::RightBrace,
-            ',' => Token::Comma,
-            '.' => Token::Dot,
-            '-' => Token::Minus,
-            '+' => Token::Plus,
-            ';' => Token::Semicolon,
-            '*' => Token::Star,
-            _ => Token::EOF,
+            '(' => Some(Token::LeftParen),
+            ')' => Some(Token::RightParen),
+            '{' => Some(Token::LeftBrace),
+            '}' => Some(Token::RightBrace),
+            ',' => Some(Token::Comma),
+            '.' => Some(Token::Dot),
+            '-' => Some(Token::Minus),
+            '+' => Some(Token::Plus),
+            ';' => Some(Token::Semicolon),
+            '*' => Some(Token::Star),
+            '!' | '=' | '<' | '>' => {
+                curr += 1;
+                let token = match (chars[curr - 1], chars.get(curr)) {
+                    ('!', Some('=')) => Token::BangEqual,
+                    ('!', _) => Token::Bang,
+                    ('=', Some('=')) => Token::EqualEqual,
+                    ('=', _) => Token::Equal,
+                    ('<', Some('=')) => Token::LessEqual,
+                    ('<', _) => Token::Less,
+                    ('>', Some('=')) => Token::GreaterEqual,
+                    ('>', _) => Token::Greater,
+                }
+                Some(token)
+            }
+            _ => {
+                println!("error on line {}", line);
+                None
+            }
         };
+        curr += 1;
     }
 
     tokens.push(Token::EOF);
