@@ -47,6 +47,7 @@ pub fn get_tokens(program: &str) -> Result<Vec<Token>, ScanningError> {
             }
             '"' => {
                 let string_start = curr + 1;
+                curr += 1;
 
                 while curr < chars.len() && chars[curr] != '"' {
                     curr += 1;
@@ -131,6 +132,7 @@ mod tests {
     fn test_single_char_tokens() {
         let source = "(){},.-+;/*! = < >";
         let tokens = get_tokens(source).unwrap();
+        assert_eq!(tokens.len(), 16);
         assert_eq!(tokens[0], Token::LeftParen);
         assert_eq!(tokens[1], Token::RightParen);
         assert_eq!(tokens[2], Token::LeftBrace);
@@ -153,10 +155,28 @@ mod tests {
     fn test_two_char_tokens() {
         let source = "!= == <= >=";
         let tokens = get_tokens(source).unwrap();
+        assert_eq!(tokens.len(), 5);
         assert_eq!(tokens[0], Token::BangEqual);
         assert_eq!(tokens[1], Token::EqualEqual);
         assert_eq!(tokens[2], Token::LessEqual);
         assert_eq!(tokens[3], Token::GreaterEqual);
         assert_eq!(tokens[4], Token::EOF);
+    }
+
+    #[test]
+    fn test_string_token() {
+        let source = "\"hello world\"";
+        let tokens = get_tokens(source).unwrap();
+        assert_eq!(tokens.len(), 2);
+        assert_eq!(tokens[0], Token::String("hello world".to_string()));
+        assert_eq!(tokens[1], Token::EOF);
+    }
+
+    #[test]
+    fn trivia_is_ignored() {
+        let source = "   \n\t // This is a comment\n";
+        let tokens = get_tokens(source).unwrap();
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0], Token::EOF);
     }
 }
