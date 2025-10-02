@@ -65,6 +65,11 @@ pub fn get_tokens(program: &str) -> Result<Vec<Token>, ScanningError> {
                 None
             }
         };
+
+        if let Some(t) = token {
+            tokens.push(t);
+        }
+
         curr += 1;
     }
 
@@ -72,6 +77,7 @@ pub fn get_tokens(program: &str) -> Result<Vec<Token>, ScanningError> {
     Ok(tokens)
 }
 
+#[derive(Debug, PartialEq)]
 pub enum Token {
     LeftParen,
     RightParen,
@@ -114,4 +120,43 @@ pub enum Token {
     EOF,
 }
 
+#[derive(Debug)]
 pub enum ScanningError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_single_char_tokens() {
+        let source = "(){},.-+;/*! = < >";
+        let tokens = get_tokens(source).unwrap();
+        assert_eq!(tokens[0], Token::LeftParen);
+        assert_eq!(tokens[1], Token::RightParen);
+        assert_eq!(tokens[2], Token::LeftBrace);
+        assert_eq!(tokens[3], Token::RightBrace);
+        assert_eq!(tokens[4], Token::Comma);
+        assert_eq!(tokens[5], Token::Dot);
+        assert_eq!(tokens[6], Token::Minus);
+        assert_eq!(tokens[7], Token::Plus);
+        assert_eq!(tokens[8], Token::Semicolon);
+        assert_eq!(tokens[9], Token::Slash);
+        assert_eq!(tokens[10], Token::Star);
+        assert_eq!(tokens[11], Token::Bang);
+        assert_eq!(tokens[12], Token::Equal);
+        assert_eq!(tokens[13], Token::Less);
+        assert_eq!(tokens[14], Token::Greater);
+        assert_eq!(tokens[15], Token::EOF);
+    }
+
+    #[test]
+    fn test_two_char_tokens() {
+        let source = "!= == <= >=";
+        let tokens = get_tokens(source).unwrap();
+        assert_eq!(tokens[0], Token::BangEqual);
+        assert_eq!(tokens[1], Token::EqualEqual);
+        assert_eq!(tokens[2], Token::LessEqual);
+        assert_eq!(tokens[3], Token::GreaterEqual);
+        assert_eq!(tokens[4], Token::EOF);
+    }
+}
