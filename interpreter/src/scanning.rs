@@ -1,6 +1,5 @@
 pub fn get_tokens(program: &str) -> Result<Vec<Token>, ScanningError> {
     let mut tokens = vec![];
-    let mut start = 0;
     let mut line = 1;
     let mut curr = 0;
     let chars: Vec<char> = program.chars().collect();
@@ -61,6 +60,30 @@ pub fn get_tokens(program: &str) -> Result<Vec<Token>, ScanningError> {
                     None
                 }
             }
+            ch if ch.is_ascii_digit() => {
+                let start = curr;
+
+                while curr < chars.len() && chars[curr].is_numeric() {
+                    curr += 1;
+                }
+
+                if chars.get(curr) == Some(&'.')
+                    && chars.get(curr + 1).is_some_and(|c| c.is_numeric())
+                {
+                    curr += 1;
+                    while curr < chars.len() && chars[curr].is_numeric() {
+                        curr += 1;
+                    }
+                }
+
+                Some(Token::Number(
+                    chars[start..curr]
+                        .iter()
+                        .collect::<String>()
+                        .parse::<f64>()
+                        .unwrap(),
+                ))
+            }
             _ => {
                 println!("error on line {}", line);
                 None
@@ -101,7 +124,7 @@ pub enum Token {
     LessEqual,
     Identifier(String),
     String(String),
-    Number(i64),
+    Number(f64),
     And,
     Class,
     Else,
@@ -129,8 +152,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_single_char_tokens() {
-        let source = "(){},.-+;/*! = < >";
+    fn single_char_tokens() {
+        let source = "(){},.-+;/*! = < >"; // (spaces to make ! = < > parse as single char tokens)
         let tokens = get_tokens(source).unwrap();
         assert_eq!(tokens.len(), 16);
         assert_eq!(tokens[0], Token::LeftParen);
@@ -152,7 +175,7 @@ mod tests {
     }
 
     #[test]
-    fn test_two_char_tokens() {
+    fn two_char_tokens() {
         let source = "!= == <= >=";
         let tokens = get_tokens(source).unwrap();
         assert_eq!(tokens.len(), 5);
@@ -164,7 +187,7 @@ mod tests {
     }
 
     #[test]
-    fn test_string_token() {
+    fn string_token() {
         let source = "\"hello world\"";
         let tokens = get_tokens(source).unwrap();
         assert_eq!(tokens.len(), 2);
@@ -178,5 +201,23 @@ mod tests {
         let tokens = get_tokens(source).unwrap();
         assert_eq!(tokens.len(), 1);
         assert_eq!(tokens[0], Token::EOF);
+    }
+
+    #[test]
+    fn numbers_without_decimal_point() {
+        let source = "1234";
+        let tokens = get_tokens(source).unwrap();
+        assert_eq!(tokens.len(), 2);
+        assert_eq!(tokens[0], Token::Number(1234.0));
+        assert_eq!(tokens[1], Token::EOF);
+    }
+
+    #[test]
+    fn numbers_with_decimal_point() {
+        let source = "123.4";
+        let tokens = get_tokens(source).unwrap();
+        assert_eq!(tokens.len(), 2);
+        assert_eq!(tokens[0], Token::Number(123.4));
+        assert_eq!(tokens[1], Token::EOF);
     }
 }
