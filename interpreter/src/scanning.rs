@@ -84,6 +84,34 @@ pub fn get_tokens(program: &str) -> Result<Vec<Token>, ScanningError> {
                         .unwrap(),
                 ))
             }
+            ch if ch.is_alphanumeric() => {
+                let start = curr;
+                while curr < chars.len() && chars[curr].is_alphanumeric() {
+                    curr += 1;
+                }
+
+                let text = chars[start..curr].iter().collect::<String>();
+                let token = match text.as_str() {
+                    "and" => Token::And,
+                    "class" => Token::Class,
+                    "else" => Token::Else,
+                    "false" => Token::False,
+                    "for" => Token::For,
+                    "fun" => Token::Fun,
+                    "if" => Token::If,
+                    "nil" => Token::Nil,
+                    "or" => Token::Or,
+                    "print" => Token::Print,
+                    "return" => Token::Return,
+                    "super" => Token::Super,
+                    "this" => Token::This,
+                    "true" => Token::True,
+                    "var" => Token::Var,
+                    "while" => Token::While,
+                    _ => Token::Identifier(text),
+                };
+                Some(token)
+            }
             _ => {
                 println!("error on line {}", line);
                 None
@@ -219,5 +247,41 @@ mod tests {
         assert_eq!(tokens.len(), 2);
         assert_eq!(tokens[0], Token::Number(123.4));
         assert_eq!(tokens[1], Token::EOF);
+    }
+
+    #[test]
+    fn keywords() {
+        let source =
+            "and class else false for fun if nil or print return super this true var while";
+        let tokens = get_tokens(source).unwrap();
+        assert_eq!(tokens.len(), 17);
+        assert_eq!(tokens[0], Token::And);
+        assert_eq!(tokens[1], Token::Class);
+        assert_eq!(tokens[2], Token::Else);
+        assert_eq!(tokens[3], Token::False);
+        assert_eq!(tokens[4], Token::For);
+        assert_eq!(tokens[5], Token::Fun);
+        assert_eq!(tokens[6], Token::If);
+        assert_eq!(tokens[7], Token::Nil);
+        assert_eq!(tokens[8], Token::Or);
+        assert_eq!(tokens[9], Token::Print);
+        assert_eq!(tokens[10], Token::Return);
+        assert_eq!(tokens[11], Token::Super);
+        assert_eq!(tokens[12], Token::This);
+        assert_eq!(tokens[13], Token::True);
+        assert_eq!(tokens[14], Token::Var);
+        assert_eq!(tokens[15], Token::While);
+        assert_eq!(tokens[16], Token::EOF);
+    }
+
+    #[test]
+    fn identifier() {
+        let source = "myVariable foo123 bar";
+        let tokens = get_tokens(source).unwrap();
+        assert_eq!(tokens.len(), 4);
+        assert_eq!(tokens[0], Token::Identifier("myVariable".to_string()));
+        assert_eq!(tokens[1], Token::Identifier("foo123".to_string()));
+        assert_eq!(tokens[2], Token::Identifier("bar".to_string()));
+        assert_eq!(tokens[3], Token::EOF);
     }
 }
