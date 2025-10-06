@@ -2,6 +2,7 @@ pub fn get_tokens(program: &str) -> Result<Vec<Token>, ScanningError> {
     let mut tokens = vec![];
     let mut line = 1;
     let mut curr = 0;
+    let mut has_error = false;
     let chars: Vec<char> = program.chars().collect();
 
     while curr < chars.len() {
@@ -56,6 +57,7 @@ pub fn get_tokens(program: &str) -> Result<Vec<Token>, ScanningError> {
                     let string = chars[string_start..curr].iter().collect();
                     Some(Token::String(string))
                 } else {
+                    has_error = true;
                     println!("error on line {}, unterminated string", line);
                     None
                 }
@@ -114,6 +116,7 @@ pub fn get_tokens(program: &str) -> Result<Vec<Token>, ScanningError> {
             }
             _ => {
                 println!("error on line {}", line);
+                has_error = true;
                 None
             }
         };
@@ -126,7 +129,11 @@ pub fn get_tokens(program: &str) -> Result<Vec<Token>, ScanningError> {
     }
 
     tokens.push(Token::EOF);
-    Ok(tokens)
+    if has_error {
+        Err(ScanningError::Error)
+    } else {
+        Ok(tokens)
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -173,7 +180,9 @@ pub enum Token {
 }
 
 #[derive(Debug)]
-pub enum ScanningError {}
+pub enum ScanningError {
+    Error,
+}
 
 #[cfg(test)]
 mod tests {
