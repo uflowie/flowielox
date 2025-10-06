@@ -1,4 +1,5 @@
 use std::{env::args, fs::read_to_string, io::stdin};
+mod parsing;
 mod scanning;
 use scanning::get_tokens;
 
@@ -35,4 +36,3 @@ fn run(program: &str) {
     println!("{}", program);
     let tokens = get_tokens(program);
 }
-
