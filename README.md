@@ -1,0 +1,1 @@
+Rust implementation of a Tree-Walk Interpreter for Lox, based on [Crafting Interpreters](https://craftinginterpreters.com/). I intend to also implement the byte code virtual machine in Rust and achieve on-par performance with the C-based implementation in the book, but there is only so much time in a day 😉.
