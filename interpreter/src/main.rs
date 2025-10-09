@@ -1,12 +1,13 @@
 use std::{
     env::args,
     fs::read_to_string,
-    io::{stdin, stdout, Write},
+    io::{Write, stdin, stdout},
 };
 mod expressions;
 mod interpreting;
 mod parsing;
 mod scanning;
+mod statements;
 use scanning::get_tokens;
 
 use crate::{interpreting::interpret, parsing::parse};
@@ -47,6 +48,6 @@ fn run(program: &str) {
         return;
     };
 
-    let expr = parse(&tokens);
-    interpret(&expr);
+    let statements = parse(&tokens);
+    interpret(&statements);
 }

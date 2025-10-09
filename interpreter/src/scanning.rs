@@ -46,45 +46,48 @@ pub fn get_tokens(program: &str) -> Result<Vec<Token>, ScanningError> {
                 None
             }
             '"' => {
-                let string_start = curr + 1;
                 curr += 1;
+                let string_start = curr;
 
                 while curr < chars.len() && chars[curr] != '"' {
                     curr += 1;
                 }
 
-                if chars[curr] == '"' {
-                    let string = chars[string_start..curr].iter().collect();
-                    Some(Token::String(string))
-                } else {
+                if curr >= chars.len() || chars[curr] != '"' {
                     has_error = true;
                     println!("error on line {}, unterminated string", line);
                     None
+                } else {
+                    let string = chars[string_start..curr].iter().collect();
+                    Some(Token::String(string))
                 }
             }
             ch if ch.is_ascii_digit() => {
                 let start = curr;
 
-                while curr < chars.len() && chars[curr].is_numeric() {
+                while curr < chars.len() && chars[curr].is_ascii_digit() {
                     curr += 1;
                 }
 
                 if chars.get(curr) == Some(&'.')
-                    && chars.get(curr + 1).is_some_and(|c| c.is_numeric())
+                    && chars.get(curr + 1).is_some_and(|c| c.is_ascii_digit())
                 {
                     curr += 1;
-                    while curr < chars.len() && chars[curr].is_numeric() {
+                    while curr < chars.len() && chars[curr].is_ascii_digit() {
                         curr += 1;
                     }
                 }
 
-                Some(Token::Number(
+                let number = Token::Number(
                     chars[start..curr]
                         .iter()
                         .collect::<String>()
                         .parse::<f64>()
                         .unwrap(),
-                ))
+                );
+                curr -= 1;
+
+                Some(number)
             }
             ch if ch.is_alphanumeric() => {
                 let start = curr;

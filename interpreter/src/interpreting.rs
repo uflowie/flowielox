@@ -1,10 +1,23 @@
-use crate::expressions::{BinaryOperator, Expression, Literal, UnaryOperator};
+use crate::{
+    expressions::{BinaryOperator, Expression, Literal, UnaryOperator},
+    statements::Statement,
+};
 
-pub fn interpret(expression: &Expression) {
-    if let Ok(value) = evaluate(expression) {
-        println!("{:?}", value);
-    } else {
-        println!("error evaluating expression");
+pub fn interpret(statements: &[Statement]) {
+    for statement in statements {
+        execute(statement);
+    }
+}
+
+fn execute(statement: &Statement) {
+    match statement {
+        Statement::Expression(expr) => {
+            evaluate(expr);
+        }
+        Statement::Print(expr) => {
+            let value = evaluate(expr).unwrap();
+            println!("{:?}", value);
+        }
     }
 }
 
@@ -78,6 +91,7 @@ enum Value {
     Nil,
 }
 
+#[derive(Debug)]
 enum EvaluationError {
     TypeMismatch,
 }

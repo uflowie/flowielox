@@ -1,9 +1,10 @@
 use crate::{
     expressions::{BinaryOperator, Expression, Literal, UnaryOperator},
     scanning::Token,
+    statements::Statement,
 };
 
-pub fn parse(tokens: &[Token]) -> Expression {
+pub fn parse(tokens: &[Token]) -> Vec<Statement> {
     let mut parser = Parser::new(tokens);
     parser.parse()
 }
@@ -18,40 +19,77 @@ impl Parser<'_> {
         Parser { tokens, curr: 0 }
     }
 
-    fn parse(&mut self) -> Expression {
-        self.expression()
+    fn parse(&mut self) -> Vec<Statement> {
+        let mut statements = Vec::new();
+
+        while self.curr < self.tokens.len() && self.curr_token() != Some(&Token::EOF) {
+            let statement = self.statement();
+            match statement {
+                Ok(statement) => statements.push(statement),
+                Err(ParsingError::UnexpectedToken(msg)) => println!("{}", msg),
+            }
+        }
+
+        statements
     }
 
-    fn expression(&mut self) -> Expression {
+    fn statement(&mut self) -> Result<Statement, ParsingError> {
+        if let Some(Token::Print) = self.curr_token() {
+            self.advance();
+            self.print_statement()
+        } else {
+            self.expression_statement()
+        }
+    }
+
+    fn print_statement(&mut self) -> Result<Statement, ParsingError> {
+        let expr = self.expression()?;
+        if let Some(Token::Semicolon) = self.curr_token() {
+            self.advance();
+            Ok(Statement::Print(expr))
+        } else {
+            Err(self.unexpected_token("semicolon"))
+        }
+    }
+
+    fn expression_statement(&mut self) -> Result<Statement, ParsingError> {
+        let expr = self.expression()?;
+        if let Some(Token::Semicolon) = self.curr_token() {
+            self.advance();
+            Ok(Statement::Expression(expr))
+        } else {
+            Err(self.unexpected_token("semicolon"))
+        }
+    }
+
+    fn expression(&mut self) -> Result<Expression, ParsingError> {
         self.equality()
     }
 
-    fn equality(&mut self) -> Expression {
-        let mut expression = self.comparison();
+    fn equality(&mut self) -> Result<Expression, ParsingError> {
+        let mut expression = self.comparison()?;
 
-        while let Some(operator @ (Token::BangEqual | Token::EqualEqual)) =
-            self.tokens.get(self.curr)
-        {
+        while let Some(operator @ (Token::BangEqual | Token::EqualEqual)) = self.curr_token() {
             let operator = match operator {
                 Token::BangEqual => BinaryOperator::BangEqual,
                 _ => BinaryOperator::EqualEqual,
             };
 
-            self.curr += 1;
+            self.advance();
 
-            let right = self.comparison();
+            let right = self.comparison()?;
             expression = Expression::Binary(Box::new(expression), operator, Box::new(right));
         }
 
-        expression
+        Ok(expression)
     }
 
-    fn comparison(&mut self) -> Expression {
-        let mut expression = self.term();
+    fn comparison(&mut self) -> Result<Expression, ParsingError> {
+        let mut expression = self.term()?;
 
         while let Some(
             operator @ (Token::Greater | Token::GreaterEqual | Token::Less | Token::LessEqual),
-        ) = self.tokens.get(self.curr)
+        ) = self.curr_token()
         {
             let operator = match operator {
                 Token::Greater => BinaryOperator::Greater,
@@ -60,84 +98,111 @@ impl Parser<'_> {
                 _ => BinaryOperator::LessEqual,
             };
 
-            self.curr += 1;
+            self.advance();
 
-            let right = self.term();
+            let right = self.term()?;
             expression = Expression::Binary(Box::new(expression), operator, Box::new(right));
         }
 
-        expression
+        Ok(expression)
     }
 
-    fn term(&mut self) -> Expression {
-        let mut expression = self.factor();
+    fn term(&mut self) -> Result<Expression, ParsingError> {
+        let mut expression = self.factor()?;
 
-        while let Some(operator @ (Token::Minus | Token::Plus)) = self.tokens.get(self.curr) {
+        while let Some(operator @ (Token::Minus | Token::Plus)) = self.curr_token() {
             let operator = match operator {
                 Token::Minus => BinaryOperator::Minus,
                 _ => BinaryOperator::Plus,
             };
 
-            self.curr += 1;
+            self.advance();
 
-            let right = self.factor();
+            let right = self.factor()?;
             expression = Expression::Binary(Box::new(expression), operator, Box::new(right));
         }
 
-        expression
+        Ok(expression)
     }
 
-    fn factor(&mut self) -> Expression {
-        let mut expression = self.unary();
+    fn factor(&mut self) -> Result<Expression, ParsingError> {
+        let mut expression = self.unary()?;
 
-        while let Some(operator @ (Token::Slash | Token::Star)) = self.tokens.get(self.curr) {
+        while let Some(operator @ (Token::Slash | Token::Star)) = self.curr_token() {
             let operator = match operator {
                 Token::Slash => BinaryOperator::Slash,
                 _ => BinaryOperator::Star,
             };
 
-            self.curr += 1;
+            self.advance();
 
-            let right = self.factor();
+            let right = self.factor()?;
             expression = Expression::Binary(Box::new(expression), operator, Box::new(right));
         }
 
-        expression
+        Ok(expression)
     }
 
-    fn unary(&mut self) -> Expression {
-        if let Some(operator @ (Token::Bang | Token::Minus)) = self.tokens.get(self.curr) {
+    fn unary(&mut self) -> Result<Expression, ParsingError> {
+        if let Some(operator @ (Token::Bang | Token::Minus)) = self.curr_token() {
             let operator = match operator {
                 Token::Bang => UnaryOperator::Bang,
                 _ => UnaryOperator::Minus,
             };
-            self.curr += 1;
-            let right = self.unary();
-            Expression::Unary(operator, Box::new(right))
+            self.advance();
+            let right = self.unary()?;
+            Ok(Expression::Unary(operator, Box::new(right)))
         } else {
             self.primary()
         }
     }
 
-    fn primary(&mut self) -> Expression {
-        let Some(token) = self.tokens.get(self.curr) else {
-            return Expression::Literal(Literal::Nil);
-        };
-        self.curr += 1;
-        match token {
-            Token::False => Expression::Literal(Literal::Boolean(false)),
-            Token::True => Expression::Literal(Literal::Boolean(true)),
-            Token::Nil => Expression::Literal(Literal::Nil),
-            Token::Number(number) => Expression::Literal(Literal::Number(*number)),
-            Token::String(str) => Expression::Literal(Literal::String(str.clone())),
-            Token::LeftParen => {
-                let expression = self.expression();
-                if self.tokens.get(self.curr) != Some(&Token::RightParen) {
-                    println!("expected right parenthesis");
-                }
-                Expression::Grouping(Box::new(expression))
+    fn primary(&mut self) -> Result<Expression, ParsingError> {
+        if let Some(
+            token @ (Token::True | Token::False | Token::Nil | Token::Number(_) | Token::String(_)),
+        ) = self.curr_token()
+        {
+            let literal = match token {
+                Token::False => Literal::Boolean(false),
+                Token::True => Literal::Boolean(true),
+                Token::Nil => Literal::Nil,
+                Token::Number(number) => Literal::Number(*number),
+                Token::String(str) => Literal::String(str.clone()),
+                _ => unreachable!(),
+            };
+            self.advance();
+            Ok(Expression::Literal(literal))
+        } else if let Some(Token::LeftParen) = self.curr_token() {
+            self.advance();
+            let expr = self.expression()?;
+            if self.curr_token() != Some(&Token::RightParen) {
+                Err(self.unexpected_token("right parenthesis"))
+            } else {
+                self.advance();
+                Ok(Expression::Grouping(Box::new(expr)))
             }
-            _ => panic!(),
+        } else {
+            Err(self.unexpected_token("primary token"))
         }
     }
+
+    fn curr_token(&self) -> Option<&Token> {
+        self.tokens.get(self.curr)
+    }
+
+    fn advance(&mut self) {
+        self.curr += 1;
+    }
+
+    fn unexpected_token(&self, expected_token: &str) -> ParsingError {
+        ParsingError::UnexpectedToken(format!(
+            "expected {}, got {:?}",
+            expected_token,
+            self.curr_token()
+        ))
+    }
+}
+
+enum ParsingError {
+    UnexpectedToken(String),
 }
