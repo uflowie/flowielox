@@ -1,7 +1,15 @@
-use std::{env::args, fs::read_to_string, io::stdin};
+use std::{
+    env::args,
+    fs::read_to_string,
+    io::{stdin, stdout, Write},
+};
+mod expressions;
+mod interpreting;
 mod parsing;
 mod scanning;
 use scanning::get_tokens;
+
+use crate::{interpreting::interpret, parsing::parse};
 
 fn main() {
     let args: Vec<_> = args().collect();
@@ -24,6 +32,8 @@ fn run_prompt() {
     let mut line = String::new();
 
     loop {
+        print!(">>> ");
+        stdout().flush().expect("failed to flush stdout");
         stdin()
             .read_line(&mut line)
             .expect("user input to not not be empty");
@@ -33,6 +43,10 @@ fn run_prompt() {
 }
 
 fn run(program: &str) {
-    println!("{}", program);
-    let tokens = get_tokens(program);
+    let Ok(tokens) = get_tokens(program) else {
+        return;
+    };
+
+    let expr = parse(&tokens);
+    interpret(&expr);
 }
