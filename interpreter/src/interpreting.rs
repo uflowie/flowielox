@@ -18,6 +18,7 @@ fn execute(statement: &Statement) {
             let value = evaluate(expr).unwrap();
             println!("{:?}", value);
         }
+        Statement::Variable { name, initializer } => todo!(),
     }
 }
 
@@ -80,6 +81,7 @@ fn evaluate(expression: &Expression) -> Result<Value, EvaluationError> {
             Ok(value)
         }
         Expression::Grouping(expression) => evaluate(expression),
+        Expression::Variable(_) => todo!(),
     }
 }
 

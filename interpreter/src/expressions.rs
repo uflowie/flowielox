@@ -6,6 +6,7 @@ pub enum Expression {
     Binary(Box<Expression>, BinaryOperator, Box<Expression>),
     Literal(Literal),
     Grouping(Box<Expression>),
+    Variable(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -83,6 +84,7 @@ impl Display for Expression {
             }
             Self::Literal(literal) => write!(f, "{}", literal),
             Self::Grouping(expression) => write!(f, "(group {})", expression),
+            Self::Variable(_) => todo!(),
         }
     }
 }
