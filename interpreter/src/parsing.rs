@@ -22,15 +22,53 @@ impl Parser<'_> {
     fn parse(&mut self) -> Vec<Statement> {
         let mut statements = Vec::new();
 
-        while self.curr < self.tokens.len() && self.curr_token() != Some(&Token::EOF) {
-            let statement = self.statement();
-            match statement {
-                Ok(statement) => statements.push(statement),
-                Err(ParsingError::UnexpectedToken(msg)) => println!("{}", msg),
+        while self.is_at_end() {
+            if let Some(stmt) = self.declaration() {
+                statements.push(stmt);
             }
         }
 
         statements
+    }
+
+    fn declaration(&mut self) -> Option<Statement> {
+        let statement = if let Some(Token::Var) = self.curr_token() {
+            self.advance();
+            self.var_declaration()
+        } else {
+            self.statement()
+        };
+
+        match statement {
+            Ok(statement) => Some(statement),
+            Err(err) => {
+                println!("{:?}", err);
+                self.synchronize();
+                None
+            }
+        }
+    }
+
+    fn var_declaration(&mut self) -> Result<Statement, ParsingError> {
+        let name = match self.curr_token() {
+            Some(Token::Identifier(n)) => n.clone(),
+            _ => return Err(self.unexpected_token("semicolon")),
+        };
+
+        self.advance();
+
+        let mut initializer = None;
+        if let Some(Token::Equal) = self.curr_token() {
+            self.advance();
+            initializer = Some(self.expression()?);
+        }
+
+        if let Some(Token::Semicolon) = self.curr_token() {
+            self.advance();
+            Ok(Statement::Variable { name, initializer })
+        } else {
+            Err(self.unexpected_token("semicolon"))
+        }
     }
 
     fn statement(&mut self) -> Result<Statement, ParsingError> {
@@ -172,6 +210,10 @@ impl Parser<'_> {
             };
             self.advance();
             Ok(Expression::Literal(literal))
+        } else if let Some(Token::Identifier(name)) = self.curr_token() {
+            let name = name.clone();
+            self.advance();
+            Ok(Expression::Variable(name))
         } else if let Some(Token::LeftParen) = self.curr_token() {
             self.advance();
             let expr = self.expression()?;
@@ -201,8 +243,39 @@ impl Parser<'_> {
             self.curr_token()
         ))
     }
+
+    fn synchronize(&mut self) {
+        self.advance();
+
+        while !self.is_at_end() {
+            if self.tokens.get(self.curr - 1) == Some(&Token::Semicolon) {
+                return;
+            }
+
+            match self.curr_token() {
+                Some(
+                    Token::Class
+                    | Token::Fun
+                    | Token::Var
+                    | Token::For
+                    | Token::If
+                    | Token::While
+                    | Token::Print
+                    | Token::Return,
+                ) => return,
+                _ => (),
+            }
+
+            self.advance();
+        }
+    }
+
+    fn is_at_end(&mut self) -> bool {
+        self.curr_token() == None || self.curr_token() == Some(&Token::EOF)
+    }
 }
 
+#[derive(Debug)]
 enum ParsingError {
     UnexpectedToken(String),
 }
