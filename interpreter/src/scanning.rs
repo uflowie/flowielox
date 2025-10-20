@@ -1,22 +1,3 @@
-use winnow::combinator::alt;
-use winnow::{Parser, Result};
-
-fn parse_token(input: &mut &str) -> Result<Token> {
-    alt((
-        '('.value(Token::LeftParen),
-        ')'.value(Token::RightParen),
-        '{'.value(Token::LeftBrace),
-        '}'.value(Token::RightBrace),
-        ','.value(Token::Comma),
-        '.'.value(Token::Dot),
-        '-'.value(Token::Minus),
-        '+'.value(Token::Plus),
-        ';'.value(Token::Semicolon),
-        '*'.value(Token::Star),
-    ))
-    .parse_next(input)
-}
-
 pub fn get_tokens(program: &str) -> Result<Vec<Token>, ScanningError> {
     let mut tokens = vec![];
     let mut line = 1;
@@ -158,7 +139,7 @@ pub fn get_tokens(program: &str) -> Result<Vec<Token>, ScanningError> {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq)]
 pub enum Token {
     LeftParen,
     RightParen,
