@@ -1,0 +1,7 @@
+var a = 10;
+
+if (1 < 3 and false == true) {
+  print a; // Should print 10
+} else {
+  print "This won't print.";
+}

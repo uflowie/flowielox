@@ -5,9 +5,10 @@ use crate::{
     statements::Statement,
 };
 
-pub fn interpret(statements: &[Statement]) {
+pub fn interpret(statements: &[Statement]) -> Result<(), EvaluationError> {
     let interpreter = Interpreter::new(statements);
-    interpreter.interpret();
+    interpreter.interpret()?;
+    Ok(())
 }
 
 struct Interpreter<'a> {
@@ -23,37 +24,56 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    fn interpret(mut self) {
+    fn interpret(mut self) -> Result<(), EvaluationError> {
         for statement in self.statements {
-            self.execute(statement);
+            self.execute(statement)?;
         }
+        Ok(())
     }
 
-    fn execute(&mut self, statement: &Statement) {
+    fn execute(&mut self, statement: &Statement) -> Result<(), EvaluationError> {
         match statement {
             Statement::Expression(expr) => {
-                self.evaluate(expr);
+                self.evaluate(expr)?;
+                Ok(())
             }
             Statement::Print(expr) => {
-                let value = self.evaluate(expr).unwrap();
+                let value = self.evaluate(expr)?;
                 println!("{:?}", value);
+                Ok(())
             }
             Statement::Variable { name, initializer } => {
                 let value = if let Some(expr) = initializer {
-                    self.evaluate(expr).unwrap()
+                    self.evaluate(expr)?
                 } else {
                     Value::Nil
                 };
                 self.environments.define(name.clone(), value);
+                Ok(())
             }
             Statement::Block(stmts) => {
                 self.environments.start_new();
 
                 for stmt in stmts {
-                    self.execute(stmt)
+                    self.execute(stmt)?;
                 }
 
                 self.environments.end();
+                Ok(())
+            }
+            Statement::If {
+                then_branch,
+                condition,
+                else_branch,
+            } => {
+                let condition = self.evaluate(condition)?.is_truthy();
+
+                if condition {
+                    self.execute(&then_branch)?;
+                } else if let Some(else_branch) = else_branch {
+                    self.execute(&else_branch)?;
+                }
+                Ok(())
             }
         }
     }
@@ -64,8 +84,7 @@ impl<'a> Interpreter<'a> {
                 let right = self.evaluate(expression)?;
                 match (operator, right) {
                     (UnaryOperator::Minus, Value::Number(num)) => Ok(Value::Number(-num)),
-                    (UnaryOperator::Bang, Value::Boolean(bool)) => Ok(Value::Boolean(!bool)),
-                    (UnaryOperator::Bang, Value::Nil) => Ok(Value::Boolean(false)),
+                    (UnaryOperator::Bang, val) => Ok(Value::Boolean(!val.is_truthy())),
                     _ => Err(EvaluationError::TypeMismatch),
                 }
             }
@@ -145,8 +164,17 @@ enum Value {
     Nil,
 }
 
+impl Value {
+    fn is_truthy(&self) -> bool {
+        match self {
+            Value::Boolean(false) | Value::Nil => false,
+            _ => true,
+        }
+    }
+}
+
 #[derive(Debug)]
-enum EvaluationError {
+pub enum EvaluationError {
     TypeMismatch,
     UndefinedVariable,
 }

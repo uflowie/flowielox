@@ -1,7 +1,7 @@
 use crate::{
     expressions::{BinaryOperator, Expression, Literal, UnaryOperator},
     scanning::Token,
-    statements::{self, Statement},
+    statements::Statement,
 };
 
 pub fn parse(tokens: &[Token]) -> Vec<Statement> {
@@ -63,12 +63,8 @@ impl Parser<'_> {
             initializer = Some(self.expression()?);
         }
 
-        if let Some(Token::Semicolon) = self.curr_token() {
-            self.advance();
-            Ok(Statement::Variable { name, initializer })
-        } else {
-            Err(self.unexpected_token("semicolon"))
-        }
+        self.consume(Token::Semicolon, "semicolon")?;
+        Ok(Statement::Variable { name, initializer })
     }
 
     fn statement(&mut self) -> Result<Statement, ParsingError> {
@@ -81,8 +77,33 @@ impl Parser<'_> {
                 self.advance();
                 self.block()
             }
+            Some(Token::If) => {
+                self.advance();
+                self.if_statement()
+            }
             _ => self.expression_statement(),
         }
+    }
+
+    fn if_statement(&mut self) -> Result<Statement, ParsingError> {
+        self.consume(Token::LeftParen, "(")?;
+        let condition = self.expression()?;
+        self.consume(Token::RightParen, ")")?;
+
+        let then_branch = Box::new(self.statement()?);
+
+        let else_branch = if let Some(Token::Else) = self.curr_token() {
+            self.advance();
+            Some(Box::new(self.statement()?))
+        } else {
+            None
+        };
+
+        Ok(Statement::If {
+            then_branch,
+            condition,
+            else_branch,
+        })
     }
 
     fn block(&mut self) -> Result<Statement, ParsingError> {
@@ -94,32 +115,21 @@ impl Parser<'_> {
             }
         }
 
-        if let Some(Token::RightBrace) = self.curr_token() {
-            self.advance();
-            Ok(Statement::Block(statements))
-        } else {
-            Err(self.unexpected_token("}"))
-        }
+        self.consume(Token::RightBrace, "}")?;
+        Ok(Statement::Block(statements))
     }
 
     fn print_statement(&mut self) -> Result<Statement, ParsingError> {
         let expr = self.expression()?;
-        if let Some(Token::Semicolon) = self.curr_token() {
-            self.advance();
-            Ok(Statement::Print(expr))
-        } else {
-            Err(self.unexpected_token("semicolon"))
-        }
+
+        self.consume(Token::Semicolon, "semicolon")?;
+        Ok(Statement::Print(expr))
     }
 
     fn expression_statement(&mut self) -> Result<Statement, ParsingError> {
         let expr = self.expression()?;
-        if let Some(Token::Semicolon) = self.curr_token() {
-            self.advance();
-            Ok(Statement::Expression(expr))
-        } else {
-            Err(self.unexpected_token("semicolon"))
-        }
+        self.consume(Token::Semicolon, "semicolon")?;
+        Ok(Statement::Expression(expr))
     }
 
     fn assignment(&mut self) -> Result<Expression, ParsingError> {
@@ -256,12 +266,9 @@ impl Parser<'_> {
         } else if let Some(Token::LeftParen) = self.curr_token() {
             self.advance();
             let expr = self.expression()?;
-            if self.curr_token() != Some(&Token::RightParen) {
-                Err(self.unexpected_token("right parenthesis"))
-            } else {
-                self.advance();
-                Ok(Expression::Grouping(Box::new(expr)))
-            }
+
+            self.consume(Token::RightParen, ")")?;
+            Ok(Expression::Grouping(Box::new(expr)))
         } else {
             Err(self.unexpected_token("primary token"))
         }
@@ -273,6 +280,15 @@ impl Parser<'_> {
 
     fn advance(&mut self) {
         self.curr += 1;
+    }
+
+    fn consume(&mut self, expected_token: Token, error_msg: &str) -> Result<(), ParsingError> {
+        if self.curr_token() != Some(&expected_token) {
+            Err(ParsingError::UnexpectedToken(error_msg.to_string()))
+        } else {
+            self.advance();
+            Ok(())
+        }
     }
 
     fn unexpected_token(&self, expected_token: &str) -> ParsingError {

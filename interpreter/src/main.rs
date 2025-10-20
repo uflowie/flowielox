@@ -49,5 +49,5 @@ fn run(program: &str) {
     };
 
     let statements = parse(&tokens);
-    interpret(&statements);
+    interpret(&statements).unwrap();
 }

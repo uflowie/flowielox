@@ -7,5 +7,10 @@ pub enum Statement {
         name: String,
         initializer: Option<Expression>,
     },
-    Block(Vec<Statement>)
+    Block(Vec<Statement>),
+    If {
+        then_branch: Box<Statement>,
+        condition: Expression,
+        else_branch: Option<Box<Statement>>,
+    },
 }
