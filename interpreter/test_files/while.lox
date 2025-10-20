@@ -1,0 +1,6 @@
+var a = 0;
+
+while (a < 5) {
+  print "Looping!";
+  a = a + 1;
+}

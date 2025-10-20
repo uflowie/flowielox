@@ -65,6 +65,11 @@ impl<'a> Interpreter<'a> {
                     self.execute(else_branch)?;
                 }
             }
+            Statement::While { condition, stmt } => {
+                while self.evaluate(condition)?.is_truthy() {
+                    self.execute(stmt)?
+                }
+            }
         }
         Ok(())
     }

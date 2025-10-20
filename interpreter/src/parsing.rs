@@ -81,8 +81,22 @@ impl Parser<'_> {
                 self.advance();
                 self.if_statement()
             }
+            Some(Token::While) => {
+                self.advance();
+                self.while_statement()
+            }
             _ => self.expression_statement(),
         }
+    }
+
+    fn while_statement(&mut self) -> Result<Statement, ParsingError> {
+        self.consume(Token::LeftParen, "(")?;
+        let condition = self.expression()?;
+        self.consume(Token::RightParen, ")")?;
+
+        let stmt = Box::new(self.statement()?);
+
+        Ok(Statement::While { condition, stmt })
     }
 
     fn if_statement(&mut self) -> Result<Statement, ParsingError> {

@@ -13,4 +13,8 @@ pub enum Statement {
         condition: Expression,
         else_branch: Option<Box<Statement>>,
     },
+    While {
+        condition: Expression,
+        stmt: Box<Statement>,
+    },
 }
