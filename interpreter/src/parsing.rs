@@ -85,8 +85,58 @@ impl Parser<'_> {
                 self.advance();
                 self.while_statement()
             }
+            Some(Token::For) => {
+                self.advance();
+                self.for_statement()
+            }
             _ => self.expression_statement(),
         }
+    }
+
+    fn for_statement(&mut self) -> Result<Statement, ParsingError> {
+        self.consume(Token::LeftParen, "(")?;
+
+        let initializer = match self.curr_token() {
+            Some(Token::Semicolon) => {
+                self.advance();
+                None
+            }
+            Some(Token::Var) => {
+                self.advance();
+                Some(self.var_declaration()?)
+            }
+            _ => Some(self.expression_statement()?),
+        };
+
+        let condition = match self.curr_token() {
+            Some(Token::Semicolon) => None,
+            _ => Some(self.expression()?),
+        };
+        self.consume(Token::Semicolon, "semicolon")?;
+
+        let increment = match self.curr_token() {
+            Some(Token::RightParen) => None,
+            _ => Some(self.expression()?),
+        };
+        self.consume(Token::RightParen, ")")?;
+
+        let body = self.statement()?;
+
+        let loop_stmt = Statement::While {
+            condition: match condition {
+                Some(expr) => expr,
+                None => Expression::Literal(Literal::Boolean(true)),
+            },
+            stmt: Box::new(match increment {
+                Some(expr) => Statement::Block(vec![body, Statement::Expression(expr)]),
+                None => body,
+            }),
+        };
+
+        Ok(match initializer {
+            Some(init) => Statement::Block(vec![init, loop_stmt]),
+            None => loop_stmt,
+        })
     }
 
     fn while_statement(&mut self) -> Result<Statement, ParsingError> {
