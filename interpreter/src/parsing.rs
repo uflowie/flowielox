@@ -1,7 +1,7 @@
 use crate::{
     expressions::{BinaryOperator, Expression, Literal, UnaryOperator},
     scanning::Token,
-    statements::Statement,
+    statements::{self, Statement},
 };
 
 pub fn parse(tokens: &[Token]) -> Vec<Statement> {
@@ -72,11 +72,33 @@ impl Parser<'_> {
     }
 
     fn statement(&mut self) -> Result<Statement, ParsingError> {
-        if let Some(Token::Print) = self.curr_token() {
+        match self.curr_token() {
+            Some(Token::Print) => {
+                self.advance();
+                self.print_statement()
+            }
+            Some(Token::LeftBrace) => {
+                self.advance();
+                self.block()
+            }
+            _ => self.expression_statement(),
+        }
+    }
+
+    fn block(&mut self) -> Result<Statement, ParsingError> {
+        let mut statements = Vec::new();
+
+        while !self.is_at_end() && self.curr_token() != Some(&Token::RightBrace) {
+            if let Some(stmt) = self.declaration() {
+                statements.push(stmt)
+            }
+        }
+
+        if let Some(Token::RightBrace) = self.curr_token() {
             self.advance();
-            self.print_statement()
+            Ok(Statement::Block(statements))
         } else {
-            self.expression_statement()
+            Err(self.unexpected_token("}"))
         }
     }
 
@@ -100,8 +122,25 @@ impl Parser<'_> {
         }
     }
 
+    fn assignment(&mut self) -> Result<Expression, ParsingError> {
+        let expr = self.equality()?;
+
+        if let Some(Token::Equal) = self.curr_token() {
+            self.advance();
+            let value = self.assignment()?;
+
+            let Expression::Variable(name) = expr else {
+                return Err(ParsingError::IllegalAssignmentTarget);
+            };
+
+            Ok(Expression::Assign(name, Box::new(value)))
+        } else {
+            Ok(expr)
+        }
+    }
+
     fn expression(&mut self) -> Result<Expression, ParsingError> {
-        self.equality()
+        self.assignment()
     }
 
     fn equality(&mut self) -> Result<Expression, ParsingError> {
@@ -278,4 +317,5 @@ impl Parser<'_> {
 #[derive(Debug)]
 enum ParsingError {
     UnexpectedToken(String),
+    IllegalAssignmentTarget,
 }

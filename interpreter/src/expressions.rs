@@ -2,6 +2,7 @@ use std::fmt::Display;
 
 #[derive(Debug)]
 pub enum Expression {
+    Assign(String, Box<Expression>),
     Unary(UnaryOperator, Box<Expression>),
     Binary(Box<Expression>, BinaryOperator, Box<Expression>),
     Literal(Literal),
@@ -78,6 +79,7 @@ impl Display for Literal {
 impl Display for Expression {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Assign(name, expression) => write!(f, "({} = {})", name, expression),
             Self::Unary(operator, expression) => write!(f, "({} {})", operator, expression),
             Self::Binary(expression1, operator, expression2) => {
                 write!(f, "({} {} {})", operator, expression1, expression2)
