@@ -115,6 +115,8 @@ pub fn get_tokens(program: &str) -> Result<Vec<Token>, ScanningError> {
                     "while" => Token::While,
                     _ => Token::Identifier(text),
                 };
+
+                curr -= 1;
                 Some(token)
             }
             _ => {

@@ -22,7 +22,7 @@ impl Parser<'_> {
     fn parse(&mut self) -> Vec<Statement> {
         let mut statements = Vec::new();
 
-        while self.is_at_end() {
+        while !self.is_at_end() {
             if let Some(stmt) = self.declaration() {
                 statements.push(stmt);
             }

@@ -15,10 +15,10 @@ use crate::{interpreting::interpret, parsing::parse};
 fn main() {
     let args: Vec<_> = args().collect();
 
-    if args.len() > 3 {
+    if args.len() > 2 {
         println!("Usage: jlox [script]");
-    } else if args.len() == 3 {
-        run_file(&args[0]);
+    } else if args.len() == 2 {
+        run_file(&args[1]);
     } else {
         run_prompt();
     }
