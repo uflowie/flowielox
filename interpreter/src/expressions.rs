@@ -5,6 +5,8 @@ pub enum Expression {
     Assign(String, Box<Expression>),
     Unary(UnaryOperator, Box<Expression>),
     Binary(Box<Expression>, BinaryOperator, Box<Expression>),
+    LogicalOr(Box<Expression>, Box<Expression>),
+    LogicalAnd(Box<Expression>, Box<Expression>),
     Literal(Literal),
     Grouping(Box<Expression>),
     Variable(String),
@@ -87,6 +89,8 @@ impl Display for Expression {
             Self::Literal(literal) => write!(f, "{}", literal),
             Self::Grouping(expression) => write!(f, "(group {})", expression),
             Self::Variable(_) => todo!(),
+            Self::LogicalOr(left, right) => write!(f, "({} or {})", left, right),
+            Self::LogicalAnd(left, right) => write!(f, "({} and {})", left, right),
         }
     }
 }

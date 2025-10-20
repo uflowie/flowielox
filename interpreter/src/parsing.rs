@@ -133,7 +133,7 @@ impl Parser<'_> {
     }
 
     fn assignment(&mut self) -> Result<Expression, ParsingError> {
-        let expr = self.equality()?;
+        let expr = self.or()?;
 
         if let Some(Token::Equal) = self.curr_token() {
             self.advance();
@@ -147,6 +147,32 @@ impl Parser<'_> {
         } else {
             Ok(expr)
         }
+    }
+
+    fn or(&mut self) -> Result<Expression, ParsingError> {
+        let mut expr = self.and()?;
+
+        while let Some(Token::Or) = self.curr_token() {
+            self.advance();
+
+            let right = self.expression()?;
+            expr = Expression::LogicalOr(Box::new(expr), Box::new(right))
+        }
+
+        Ok(expr)
+    }
+
+    fn and(&mut self) -> Result<Expression, ParsingError> {
+        let mut expr = self.equality()?;
+
+        while let Some(Token::And) = self.curr_token() {
+            self.advance();
+
+            let right = self.expression()?;
+            expr = Expression::LogicalAnd(Box::new(expr), Box::new(right))
+        }
+
+        Ok(expr)
     }
 
     fn expression(&mut self) -> Result<Expression, ParsingError> {

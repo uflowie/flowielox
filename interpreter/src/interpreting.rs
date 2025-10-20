@@ -71,6 +71,22 @@ impl<'a> Interpreter<'a> {
 
     fn evaluate(&mut self, expression: &Expression) -> Result<Value, EvaluationError> {
         match expression {
+            Expression::LogicalOr(left, right) => {
+                let left = self.evaluate(left)?;
+                if left.is_truthy() {
+                    Ok(left)
+                } else {
+                    self.evaluate(right)
+                }
+            }
+            Expression::LogicalAnd(left, right) => {
+                let left = self.evaluate(left)?;
+                if !left.is_truthy() {
+                    Ok(left)
+                } else {
+                    self.evaluate(right)
+                }
+            }
             Expression::Unary(operator, expression) => {
                 let right = self.evaluate(expression)?;
                 match (operator, right) {
