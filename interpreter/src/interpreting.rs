@@ -6,9 +6,7 @@ use crate::{
 };
 
 pub fn interpret(statements: &[Statement]) -> Result<(), EvaluationError> {
-    let interpreter = Interpreter::new(statements);
-    interpreter.interpret()?;
-    Ok(())
+    Interpreter::new(statements).interpret()
 }
 
 struct Interpreter<'a> {
@@ -35,21 +33,17 @@ impl<'a> Interpreter<'a> {
         match statement {
             Statement::Expression(expr) => {
                 self.evaluate(expr)?;
-                Ok(())
             }
             Statement::Print(expr) => {
                 let value = self.evaluate(expr)?;
                 println!("{:?}", value);
-                Ok(())
             }
             Statement::Variable { name, initializer } => {
-                let value = if let Some(expr) = initializer {
-                    self.evaluate(expr)?
-                } else {
-                    Value::Nil
+                let value = match initializer {
+                    Some(expr) => self.evaluate(expr)?,
+                    None => Value::Nil,
                 };
                 self.environments.define(name.clone(), value);
-                Ok(())
             }
             Statement::Block(stmts) => {
                 self.environments.start_new();
@@ -59,23 +53,20 @@ impl<'a> Interpreter<'a> {
                 }
 
                 self.environments.end();
-                Ok(())
             }
             Statement::If {
                 then_branch,
                 condition,
                 else_branch,
             } => {
-                let condition = self.evaluate(condition)?.is_truthy();
-
-                if condition {
-                    self.execute(&then_branch)?;
+                if self.evaluate(condition)?.is_truthy() {
+                    self.execute(then_branch)?;
                 } else if let Some(else_branch) = else_branch {
-                    self.execute(&else_branch)?;
+                    self.execute(else_branch)?;
                 }
-                Ok(())
             }
         }
+        Ok(())
     }
 
     fn evaluate(&mut self, expression: &Expression) -> Result<Value, EvaluationError> {
@@ -126,30 +117,23 @@ impl<'a> Interpreter<'a> {
                     _ => Err(EvaluationError::TypeMismatch),
                 }
             }
-            Expression::Literal(literal) => {
-                let value = match literal {
-                    Literal::String(str) => Value::String(str.clone()),
-                    Literal::Number(num) => Value::Number(*num),
-                    Literal::Boolean(bool) => Value::Boolean(*bool),
-                    Literal::Nil => Value::Nil,
-                };
-                Ok(value)
-            }
+            Expression::Literal(literal) => Ok(match literal {
+                Literal::String(s) => Value::String(s.clone()),
+                Literal::Number(num) => Value::Number(*num),
+                Literal::Boolean(b) => Value::Boolean(*b),
+                Literal::Nil => Value::Nil,
+            }),
             Expression::Grouping(expression) => self.evaluate(expression),
-            Expression::Variable(name) => {
-                if let Some(val) = self.environments.get(name) {
-                    Ok(val.clone())
-                } else {
-                    Err(EvaluationError::UndefinedVariable)
-                }
-            }
+            Expression::Variable(name) => self
+                .environments
+                .get(name)
+                .cloned()
+                .ok_or(EvaluationError::UndefinedVariable),
             Expression::Assign(name, expr) => {
                 let value = self.evaluate(expr)?;
-
-                if let None = self.environments.assign(name, &value) {
-                    Ok(value)
-                } else {
-                    Err(EvaluationError::UndefinedVariable)
+                match self.environments.assign(name, &value) {
+                    None => Ok(value),
+                    Some(err) => Err(err),
                 }
             }
         }
@@ -195,22 +179,21 @@ impl EnvironmentStack {
     }
 
     fn assign(&mut self, key: &str, value: &Value) -> Option<EvaluationError> {
-        for env in self.values.iter_mut().rev() {
-            if let Some(val) = env.get_mut(key) {
-                *val = value.clone();
-                return None;
-            }
+        if let Some(slot) = self
+            .values
+            .iter_mut()
+            .rev()
+            .find_map(|env| env.get_mut(key))
+        {
+            *slot = value.clone();
+            None
+        } else {
+            Some(EvaluationError::UndefinedVariable)
         }
-        return Some(EvaluationError::UndefinedVariable);
     }
 
     fn get(&self, key: &str) -> Option<&Value> {
-        for env in self.values.iter().rev() {
-            if let Some(val) = env.get(key) {
-                return Some(val);
-            }
-        }
-        return None;
+        self.values.iter().rev().find_map(|env| env.get(key))
     }
 
     fn start_new(&mut self) {
