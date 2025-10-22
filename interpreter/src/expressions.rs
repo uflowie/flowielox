@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Expression {
     Assign(String, Box<Expression>),
     Unary(UnaryOperator, Box<Expression>),
@@ -10,6 +10,10 @@ pub enum Expression {
     Literal(Literal),
     Grouping(Box<Expression>),
     Variable(String),
+    Call {
+        callee: Box<Expression>,
+        args: Vec<Expression>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,7 +36,7 @@ pub enum BinaryOperator {
     LessEqual,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Literal {
     Number(f64),
     String(String),
@@ -91,6 +95,7 @@ impl Display for Expression {
             Self::Variable(_) => todo!(),
             Self::LogicalOr(left, right) => write!(f, "({} or {})", left, right),
             Self::LogicalAnd(left, right) => write!(f, "({} and {})", left, right),
+            Self::Call { callee, args } => write!(f, "({}({:?}))", callee, args),
         }
     }
 }

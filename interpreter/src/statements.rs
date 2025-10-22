@@ -1,5 +1,6 @@
 use crate::expressions::Expression;
 
+#[derive(Debug, PartialEq, Clone)]
 pub enum Statement {
     Expression(Expression),
     Print(Expression),
@@ -16,5 +17,10 @@ pub enum Statement {
     While {
         condition: Expression,
         stmt: Box<Statement>,
+    },
+    Function {
+        name: String,
+        params: Vec<String>,
+        body: Vec<Statement>,
     },
 }

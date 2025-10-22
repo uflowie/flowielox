@@ -73,10 +73,7 @@ impl Parser<'_> {
                 self.advance();
                 self.print_statement()
             }
-            Some(Token::LeftBrace) => {
-                self.advance();
-                self.block()
-            }
+            Some(Token::LeftBrace) => Ok(Statement::Block(self.block()?)),
             Some(Token::If) => {
                 self.advance();
                 self.if_statement()
@@ -89,8 +86,53 @@ impl Parser<'_> {
                 self.advance();
                 self.for_statement()
             }
+            Some(Token::Fun) => {
+                self.advance();
+                self.function()
+            }
             _ => self.expression_statement(),
         }
+    }
+
+    fn function(&mut self) -> Result<Statement, ParsingError> {
+        let Some(Token::Identifier(name)) = self.curr_token() else {
+            return Err(self.unexpected_token("identifier"));
+        };
+        let name = name.clone();
+        self.advance();
+
+        self.consume(Token::LeftParen, "(")?;
+        let mut params = vec![];
+
+        if self.curr_token() != Some(&Token::RightParen) {
+            loop {
+                if params.len() >= 255 {
+                    return Err(ParsingError::TooManyArguments);
+                }
+
+                if let Some(Token::Identifier(name)) = self.curr_token() {
+                    params.push(name.clone());
+                    self.advance();
+                } else {
+                    return Err(ParsingError::UnexpectedToken(String::from(
+                        "expected identifier",
+                    )));
+                }
+
+                if self.curr_token() == Some(&Token::Comma) {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+        }
+        self.consume(
+            Token::RightParen,
+            "expected ) at the end of function parameter list",
+        )?;
+        let body = self.block()?;
+
+        Ok(Statement::Function { name, params, body })
     }
 
     fn for_statement(&mut self) -> Result<Statement, ParsingError> {
@@ -170,7 +212,9 @@ impl Parser<'_> {
         })
     }
 
-    fn block(&mut self) -> Result<Statement, ParsingError> {
+    fn block(&mut self) -> Result<Vec<Statement>, ParsingError> {
+        self.consume(Token::LeftBrace, "expected { at the start of a block")?;
+
         let mut statements = Vec::new();
 
         while !self.is_at_end() && self.curr_token() != Some(&Token::RightBrace) {
@@ -179,8 +223,8 @@ impl Parser<'_> {
             }
         }
 
-        self.consume(Token::RightBrace, "}")?;
-        Ok(Statement::Block(statements))
+        self.consume(Token::RightBrace, "expected } at the end of a block")?;
+        Ok(statements)
     }
 
     fn print_statement(&mut self) -> Result<Statement, ParsingError> {
@@ -330,8 +374,49 @@ impl Parser<'_> {
             let right = self.unary()?;
             Ok(Expression::Unary(operator, Box::new(right)))
         } else {
-            self.primary()
+            self.call()
         }
+    }
+
+    fn call(&mut self) -> Result<Expression, ParsingError> {
+        let mut expr = self.primary()?;
+
+        loop {
+            if self.curr_token() == Some(&Token::LeftParen) {
+                self.advance();
+                expr = self.finish_call(expr)?;
+            } else {
+                break;
+            }
+        }
+
+        Ok(expr)
+    }
+
+    fn finish_call(&mut self, callee: Expression) -> Result<Expression, ParsingError> {
+        let mut args = vec![];
+
+        if self.curr_token() != Some(&Token::RightParen) {
+            loop {
+                if args.len() >= 255 {
+                    return Err(ParsingError::TooManyArguments);
+                }
+                args.push(self.expression()?);
+
+                if self.curr_token() == Some(&Token::Comma) {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+        }
+
+        self.consume(Token::RightParen, ")")?;
+
+        Ok(Expression::Call {
+            callee: Box::new(callee),
+            args,
+        })
     }
 
     fn primary(&mut self) -> Result<Expression, ParsingError> {
@@ -374,7 +459,11 @@ impl Parser<'_> {
 
     fn consume(&mut self, expected_token: Token, error_msg: &str) -> Result<(), ParsingError> {
         if self.curr_token() != Some(&expected_token) {
-            Err(ParsingError::UnexpectedToken(error_msg.to_string()))
+            Err(ParsingError::UnexpectedToken(format!(
+                "{}, got {:?}",
+                error_msg.to_string(),
+                self.curr_token()
+            )))
         } else {
             self.advance();
             Ok(())
@@ -424,4 +513,5 @@ impl Parser<'_> {
 enum ParsingError {
     UnexpectedToken(String),
     IllegalAssignmentTarget,
+    TooManyArguments,
 }

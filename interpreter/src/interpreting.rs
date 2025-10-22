@@ -1,4 +1,7 @@
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use crate::{
     expressions::{BinaryOperator, Expression, Literal, UnaryOperator},
@@ -6,7 +9,22 @@ use crate::{
 };
 
 pub fn interpret(statements: &[Statement]) -> Result<(), EvaluationError> {
-    Interpreter::new(statements).interpret()
+    let mut interpreter = Interpreter::new(statements);
+
+    // before we start interpreting anything, anything will be defined in the
+    let global = &mut interpreter.environments;
+    global.define(String::from("clock"), Value::NativeFunction(|_| clock()));
+
+    interpreter.interpret()
+}
+
+fn clock() -> Value {
+    Value::Number(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as f64,
+    )
 }
 
 struct Interpreter<'a> {
@@ -49,7 +67,10 @@ impl<'a> Interpreter<'a> {
                 self.environments.start_new();
 
                 for stmt in stmts {
-                    self.execute(stmt)?;
+                    if let Err(err) = self.execute(stmt) {
+                        self.environments.end();
+                        return Err(err);
+                    }
                 }
 
                 self.environments.end();
@@ -69,6 +90,15 @@ impl<'a> Interpreter<'a> {
                 while self.evaluate(condition)?.is_truthy() {
                     self.execute(stmt)?
                 }
+            }
+            Statement::Function { name, params, body } => {
+                self.environments.define(
+                    name.clone(),
+                    Value::Function {
+                        params: params.clone(),
+                        body: body.clone(),
+                    },
+                );
             }
         }
         Ok(())
@@ -109,6 +139,9 @@ impl<'a> Interpreter<'a> {
                     }
                     (BinaryOperator::Plus, Value::Number(left), Value::Number(right)) => {
                         Ok(Value::Number(left + right))
+                    }
+                    (BinaryOperator::Plus, Value::String(left), Value::String(right)) => {
+                        Ok(Value::String(left + &right))
                     }
                     (BinaryOperator::Minus, Value::String(left), Value::String(right)) => {
                         Ok(Value::String(left + &right))
@@ -157,6 +190,39 @@ impl<'a> Interpreter<'a> {
                     Some(err) => Err(err),
                 }
             }
+            Expression::Call { callee, args } => {
+                let callee = self.evaluate(callee)?;
+
+                let args = args
+                    .iter()
+                    .map(|arg| self.evaluate(arg))
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                self.call(&callee, &args)
+            }
+        }
+    }
+
+    fn call(&mut self, callee: &Value, args: &[Value]) -> Result<Value, EvaluationError> {
+        match callee {
+            Value::NativeFunction(func) => Ok(func(args)),
+            Value::Function { params, body } => {
+                self.environments.start_new();
+                for (param, arg) in params.iter().zip(args) {
+                    self.environments.define(param.clone(), arg.clone());
+                }
+
+                for stmt in body {
+                    if let Err(err) = self.execute(stmt) {
+                        self.environments.end();
+                        return Err(err);
+                    }
+                }
+
+                self.environments.end();
+                Ok(Value::Nil)
+            }
+            _ => Err(EvaluationError::InvalidCalleeType),
         }
     }
 }
@@ -167,6 +233,11 @@ enum Value {
     String(String),
     Boolean(bool),
     Nil,
+    NativeFunction(fn(&[Value]) -> Value),
+    Function {
+        params: Vec<String>,
+        body: Vec<Statement>,
+    },
 }
 
 impl Value {
@@ -182,6 +253,8 @@ impl Value {
 pub enum EvaluationError {
     TypeMismatch,
     UndefinedVariable,
+    InvalidCalleeType,
+    InvalidNumberOfArgumentsPassed,
 }
 
 struct EnvironmentStack {
