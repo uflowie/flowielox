@@ -90,7 +90,25 @@ impl Parser<'_> {
                 self.advance();
                 self.function()
             }
+            Some(Token::Return) => {
+                self.advance();
+                self.return_statement()
+            }
             _ => self.expression_statement(),
+        }
+    }
+
+    fn return_statement(&mut self) -> Result<Statement, ParsingError> {
+        if let Some(Token::Semicolon) = self.curr_token() {
+            self.advance();
+            Ok(Statement::Return(None))
+        } else {
+            let expr = self.expression()?;
+            self.consume(
+                Token::Semicolon,
+                "expected semicolon after return expression",
+            )?;
+            Ok(Statement::Return(Some(expr)))
         }
     }
 

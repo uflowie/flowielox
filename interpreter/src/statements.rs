@@ -23,4 +23,5 @@ pub enum Statement {
         params: Vec<String>,
         body: Vec<Statement>,
     },
+    Return(Option<Expression>),
 }

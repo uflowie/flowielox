@@ -100,6 +100,13 @@ impl<'a> Interpreter<'a> {
                     },
                 );
             }
+            Statement::Return(expr) => {
+                let ret = match expr {
+                    Some(expr) => self.evaluate(expr)?,
+                    None => Value::Nil,
+                };
+                return Err(EvaluationError::PotentiallyIllegalReturnStatement(ret));
+            }
         }
         Ok(())
     }
@@ -213,9 +220,16 @@ impl<'a> Interpreter<'a> {
                 }
 
                 for stmt in body {
-                    if let Err(err) = self.execute(stmt) {
-                        self.environments.end();
-                        return Err(err);
+                    match self.execute(stmt) {
+                        Err(EvaluationError::PotentiallyIllegalReturnStatement(val)) => {
+                            self.environments.end();
+                            return Ok(val);
+                        }
+                        Err(err) => {
+                            self.environments.end();
+                            return Err(err);
+                        }
+                        _ => continue,
                     }
                 }
 
@@ -255,6 +269,7 @@ pub enum EvaluationError {
     UndefinedVariable,
     InvalidCalleeType,
     InvalidNumberOfArgumentsPassed,
+    PotentiallyIllegalReturnStatement(Value), // ;)
 }
 
 struct EnvironmentStack {
