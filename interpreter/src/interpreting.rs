@@ -95,6 +95,7 @@ impl<'a> Interpreter<'a> {
                 self.environments.define(
                     name.clone(),
                     Value::Function {
+                        env_id: self.environments.curr,
                         params: params.clone(),
                         body: body.clone(),
                     },
@@ -213,11 +214,17 @@ impl<'a> Interpreter<'a> {
     fn call(&mut self, callee: &Value, args: &[Value]) -> Result<Value, EvaluationError> {
         match callee {
             Value::NativeFunction(func) => Ok(func(args)),
-            Value::Function { params, body } => {
+            Value::Function {
+                params,
+                body,
+                env_id,
+            } => {
                 if params.len() != args.len() {
                     return Err(EvaluationError::InvalidNumberOfArgumentsPassed);
                 }
 
+                let old_env_id = self.environments.curr;
+                self.environments.curr = *env_id;
                 self.environments.start_new();
 
                 for (param, arg) in params.iter().zip(args) {
@@ -227,18 +234,18 @@ impl<'a> Interpreter<'a> {
                 for stmt in body {
                     match self.execute(stmt) {
                         Err(EvaluationError::PotentiallyIllegalReturnStatement(val)) => {
-                            self.environments.end();
+                            self.environments.curr = old_env_id;
                             return Ok(val);
                         }
                         Err(err) => {
-                            self.environments.end();
+                            self.environments.curr = old_env_id;
                             return Err(err);
                         }
                         _ => continue,
                     }
                 }
 
-                self.environments.end();
+                self.environments.curr = old_env_id;
                 Ok(Value::Nil)
             }
             _ => Err(EvaluationError::InvalidCalleeType),
@@ -254,6 +261,7 @@ pub enum Value {
     Nil,
     NativeFunction(fn(&[Value]) -> Value),
     Function {
+        env_id: usize,
         params: Vec<String>,
         body: Vec<Statement>,
     },
@@ -341,7 +349,7 @@ impl Environments {
     fn end(&mut self) {
         self.curr = self.envs[self.curr]
             .parent_id
-            .expect("did not expect root scope to get closed")
+            .expect("did not expect root scope to be closed")
     }
 
     fn find_id_of_env_containing_key(&self, key: &str) -> Option<usize> {
