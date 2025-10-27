@@ -28,14 +28,14 @@ fn clock() -> Value {
 }
 
 struct Interpreter<'a> {
-    environments: EnvironmentStack,
+    environments: Environments,
     statements: &'a [Statement],
 }
 
 impl<'a> Interpreter<'a> {
     fn new(statements: &'a [Statement]) -> Self {
         Self {
-            environments: EnvironmentStack::new(),
+            environments: Environments::new(),
             statements,
         }
     }
@@ -193,8 +193,8 @@ impl<'a> Interpreter<'a> {
             Expression::Assign(name, expr) => {
                 let value = self.evaluate(expr)?;
                 match self.environments.assign(name, &value) {
-                    None => Ok(value),
-                    Some(err) => Err(err),
+                    Ok(()) => Ok(value),
+                    Err(err) => Err(err),
                 }
             }
             Expression::Call { callee, args } => {
@@ -214,7 +214,12 @@ impl<'a> Interpreter<'a> {
         match callee {
             Value::NativeFunction(func) => Ok(func(args)),
             Value::Function { params, body } => {
+                if params.len() != args.len() {
+                    return Err(EvaluationError::InvalidNumberOfArgumentsPassed);
+                }
+
                 self.environments.start_new();
+
                 for (param, arg) in params.iter().zip(args) {
                     self.environments.define(param.clone(), arg.clone());
                 }
@@ -242,7 +247,7 @@ impl<'a> Interpreter<'a> {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-enum Value {
+pub enum Value {
     Number(f64),
     String(String),
     Boolean(bool),
@@ -272,44 +277,83 @@ pub enum EvaluationError {
     PotentiallyIllegalReturnStatement(Value), // ;)
 }
 
-struct EnvironmentStack {
-    values: Vec<HashMap<String, Value>>,
+struct Environment {
+    parent_id: Option<usize>,
+    values: HashMap<String, Value>,
 }
 
-impl EnvironmentStack {
+impl Environment {
+    fn new(parent_id: usize) -> Self {
+        Self {
+            parent_id: Some(parent_id),
+            values: HashMap::new(),
+        }
+    }
+
+    fn root() -> Self {
+        Self {
+            parent_id: None,
+            values: HashMap::new(),
+        }
+    }
+}
+
+struct Environments {
+    curr: usize,
+    envs: Vec<Environment>,
+}
+
+impl Environments {
     fn new() -> Self {
         Self {
-            values: vec![HashMap::new()],
+            curr: 0,
+            envs: vec![Environment::root()],
         }
     }
 
     fn define(&mut self, key: String, value: Value) {
-        self.values.last_mut().unwrap().insert(key, value);
+        self.envs[self.curr].values.insert(key, value);
     }
 
-    fn assign(&mut self, key: &str, value: &Value) -> Option<EvaluationError> {
-        if let Some(slot) = self
-            .values
-            .iter_mut()
-            .rev()
-            .find_map(|env| env.get_mut(key))
-        {
-            *slot = value.clone();
-            None
-        } else {
-            Some(EvaluationError::UndefinedVariable)
-        }
+    fn assign(&mut self, key: &str, value: &Value) -> Result<(), EvaluationError> {
+        let id = self
+            .find_id_of_env_containing_key(key)
+            .ok_or(EvaluationError::UndefinedVariable)?;
+
+        let slot = self.envs[id].values.get_mut(key).expect(
+            "find should have returned the id of an environment that contains the given key",
+        );
+
+        *slot = value.clone();
+        Ok(())
     }
 
     fn get(&self, key: &str) -> Option<&Value> {
-        self.values.iter().rev().find_map(|env| env.get(key))
+        let id = self.find_id_of_env_containing_key(key)?;
+        self.envs[id].values.get(key)
     }
 
     fn start_new(&mut self) {
-        self.values.push(HashMap::new())
+        self.envs.push(Environment::new(self.curr));
+        self.curr = self.envs.len() - 1
     }
 
     fn end(&mut self) {
-        self.values.pop();
+        self.curr = self.envs[self.curr]
+            .parent_id
+            .expect("did not expect root scope to get closed")
+    }
+
+    fn find_id_of_env_containing_key(&self, key: &str) -> Option<usize> {
+        let mut curr_id = Some(self.curr);
+
+        while let Some(id) = curr_id {
+            if self.envs[id].values.contains_key(key) {
+                return curr_id;
+            }
+            curr_id = self.envs[id].parent_id;
+        }
+
+        return None;
     }
 }
