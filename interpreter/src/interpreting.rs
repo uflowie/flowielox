@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-    expressions::{BinaryOperator, Expression, Literal, UnaryOperator},
+    expressions::{BinaryOperator, Expression, ExpressionType, Literal, UnaryOperator},
     statements::Statement,
 };
 
@@ -112,35 +112,35 @@ impl<'a> Interpreter<'a> {
         Ok(())
     }
 
-    fn evaluate(&mut self, expression: &Expression) -> Result<Value, EvaluationError> {
-        match expression {
-            Expression::LogicalOr(left, right) => {
-                let left = self.evaluate(left)?;
+    fn evaluate(&mut self, expr: &Expression) -> Result<Value, EvaluationError> {
+        match expr.expr_type.as_ref() {
+            ExpressionType::LogicalOr(left, right) => {
+                let left = self.evaluate(&left)?;
                 if left.is_truthy() {
                     Ok(left)
                 } else {
-                    self.evaluate(right)
+                    self.evaluate(&right)
                 }
             }
-            Expression::LogicalAnd(left, right) => {
-                let left = self.evaluate(left)?;
+            ExpressionType::LogicalAnd(left, right) => {
+                let left = self.evaluate(&left)?;
                 if !left.is_truthy() {
                     Ok(left)
                 } else {
-                    self.evaluate(right)
+                    self.evaluate(&right)
                 }
             }
-            Expression::Unary(operator, expression) => {
-                let right = self.evaluate(expression)?;
+            ExpressionType::Unary(operator, expression) => {
+                let right = self.evaluate(&expression)?;
                 match (operator, right) {
                     (UnaryOperator::Minus, Value::Number(num)) => Ok(Value::Number(-num)),
                     (UnaryOperator::Bang, val) => Ok(Value::Boolean(!val.is_truthy())),
                     _ => Err(EvaluationError::TypeMismatch),
                 }
             }
-            Expression::Binary(left, operator, right) => {
-                let left = self.evaluate(left)?;
-                let right = self.evaluate(right)?;
+            ExpressionType::Binary(left, operator, right) => {
+                let left = self.evaluate(&left)?;
+                let right = self.evaluate(&right)?;
                 match (operator, left, right) {
                     (BinaryOperator::Minus, Value::Number(left), Value::Number(right)) => {
                         Ok(Value::Number(left - right))
@@ -179,27 +179,27 @@ impl<'a> Interpreter<'a> {
                     _ => Err(EvaluationError::TypeMismatch),
                 }
             }
-            Expression::Literal(literal) => Ok(match literal {
+            ExpressionType::Literal(literal) => Ok(match literal {
                 Literal::String(s) => Value::String(s.clone()),
                 Literal::Number(num) => Value::Number(*num),
                 Literal::Boolean(b) => Value::Boolean(*b),
                 Literal::Nil => Value::Nil,
             }),
-            Expression::Grouping(expression) => self.evaluate(expression),
-            Expression::Variable(name) => self
+            ExpressionType::Grouping(expression) => self.evaluate(&expression),
+            ExpressionType::Variable(name) => self
                 .environments
-                .get(name)
+                .get(&name)
                 .cloned()
                 .ok_or(EvaluationError::UndefinedVariable),
-            Expression::Assign(name, expr) => {
-                let value = self.evaluate(expr)?;
-                match self.environments.assign(name, &value) {
+            ExpressionType::Assign(name, expr) => {
+                let value = self.evaluate(&expr)?;
+                match self.environments.assign(&name, &value) {
                     Ok(()) => Ok(value),
                     Err(err) => Err(err),
                 }
             }
-            Expression::Call { callee, args } => {
-                let callee = self.evaluate(callee)?;
+            ExpressionType::Call { callee, args } => {
+                let callee = self.evaluate(&callee)?;
 
                 let args = args
                     .iter()

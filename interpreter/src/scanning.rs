@@ -8,16 +8,16 @@ pub fn get_tokens(program: &str) -> Result<Vec<Token>, ScanningError> {
     while curr < chars.len() {
         let next_ch = chars.get(curr + 1);
         let token = match chars[curr] {
-            '(' => Some(Token::LeftParen),
-            ')' => Some(Token::RightParen),
-            '{' => Some(Token::LeftBrace),
-            '}' => Some(Token::RightBrace),
-            ',' => Some(Token::Comma),
-            '.' => Some(Token::Dot),
-            '-' => Some(Token::Minus),
-            '+' => Some(Token::Plus),
-            ';' => Some(Token::Semicolon),
-            '*' => Some(Token::Star),
+            '(' => Some(TokenType::LeftParen),
+            ')' => Some(TokenType::RightParen),
+            '{' => Some(TokenType::LeftBrace),
+            '}' => Some(TokenType::RightBrace),
+            ',' => Some(TokenType::Comma),
+            '.' => Some(TokenType::Dot),
+            '-' => Some(TokenType::Minus),
+            '+' => Some(TokenType::Plus),
+            ';' => Some(TokenType::Semicolon),
+            '*' => Some(TokenType::Star),
             '/' if next_ch == Some(&'/') => {
                 // '//' comments: scan to end of line or EOF and discard chars (no token)
                 while curr < chars.len() && chars[curr] != '\n' {
@@ -25,21 +25,21 @@ pub fn get_tokens(program: &str) -> Result<Vec<Token>, ScanningError> {
                 }
                 None
             }
-            '/' => Some(Token::Slash),
+            '/' => Some(TokenType::Slash),
             ch @ ('!' | '=' | '<' | '>') if next_ch == Some(&'=') => {
                 curr += 1; // consume the equals character because it's part of the current token
                 Some(match ch {
-                    '!' => Token::BangEqual,
-                    '=' => Token::EqualEqual,
-                    '<' => Token::LessEqual,
-                    '>' => Token::GreaterEqual,
+                    '!' => TokenType::BangEqual,
+                    '=' => TokenType::EqualEqual,
+                    '<' => TokenType::LessEqual,
+                    '>' => TokenType::GreaterEqual,
                     _ => unreachable!(),
                 })
             }
-            '!' => Some(Token::Bang),
-            '=' => Some(Token::Equal),
-            '<' => Some(Token::Less),
-            '>' => Some(Token::Greater),
+            '!' => Some(TokenType::Bang),
+            '=' => Some(TokenType::Equal),
+            '<' => Some(TokenType::Less),
+            '>' => Some(TokenType::Greater),
             ' ' | '\r' | '\t' => None,
             '\n' => {
                 line += 1;
@@ -59,7 +59,7 @@ pub fn get_tokens(program: &str) -> Result<Vec<Token>, ScanningError> {
                     None
                 } else {
                     let string = chars[string_start..curr].iter().collect();
-                    Some(Token::String(string))
+                    Some(TokenType::String(string))
                 }
             }
             ch if ch.is_ascii_digit() => {
@@ -78,7 +78,7 @@ pub fn get_tokens(program: &str) -> Result<Vec<Token>, ScanningError> {
                     }
                 }
 
-                let number = Token::Number(
+                let number = TokenType::Number(
                     chars[start..curr]
                         .iter()
                         .collect::<String>()
@@ -97,23 +97,23 @@ pub fn get_tokens(program: &str) -> Result<Vec<Token>, ScanningError> {
 
                 let text = chars[start..curr].iter().collect::<String>();
                 let token = match text.as_str() {
-                    "and" => Token::And,
-                    "class" => Token::Class,
-                    "else" => Token::Else,
-                    "false" => Token::False,
-                    "for" => Token::For,
-                    "fun" => Token::Fun,
-                    "if" => Token::If,
-                    "nil" => Token::Nil,
-                    "or" => Token::Or,
-                    "print" => Token::Print,
-                    "return" => Token::Return,
-                    "super" => Token::Super,
-                    "this" => Token::This,
-                    "true" => Token::True,
-                    "var" => Token::Var,
-                    "while" => Token::While,
-                    _ => Token::Identifier(text),
+                    "and" => TokenType::And,
+                    "class" => TokenType::Class,
+                    "else" => TokenType::Else,
+                    "false" => TokenType::False,
+                    "for" => TokenType::For,
+                    "fun" => TokenType::Fun,
+                    "if" => TokenType::If,
+                    "nil" => TokenType::Nil,
+                    "or" => TokenType::Or,
+                    "print" => TokenType::Print,
+                    "return" => TokenType::Return,
+                    "super" => TokenType::Super,
+                    "this" => TokenType::This,
+                    "true" => TokenType::True,
+                    "var" => TokenType::Var,
+                    "while" => TokenType::While,
+                    _ => TokenType::Identifier(text),
                 };
 
                 curr -= 1;
@@ -126,14 +126,17 @@ pub fn get_tokens(program: &str) -> Result<Vec<Token>, ScanningError> {
             }
         };
 
-        if let Some(t) = token {
-            tokens.push(t);
+        if let Some(token_type) = token {
+            tokens.push(Token { line, token_type });
         }
 
         curr += 1;
     }
 
-    tokens.push(Token::EOF);
+    tokens.push(Token {
+        token_type: TokenType::EOF,
+        line,
+    });
 
     println!("tokens: {:?}", tokens);
 
@@ -145,7 +148,13 @@ pub fn get_tokens(program: &str) -> Result<Vec<Token>, ScanningError> {
 }
 
 #[derive(Debug, PartialEq)]
-pub enum Token {
+pub struct Token {
+    pub line: usize,
+    pub token_type: TokenType,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum TokenType {
     LeftParen,
     RightParen,
     LeftBrace,
@@ -199,106 +208,118 @@ mod tests {
     #[test]
     fn single_char_tokens() {
         let source = "(){},.-+;/*! = < >"; // (spaces to make ! = < > parse as single char tokens)
-        let tokens = get_tokens(source).unwrap();
+        let tokens: Vec<_> = get_tokens(source)
+            .unwrap()
+            .into_iter()
+            .map(|t| t.token_type)
+            .collect();
         assert_eq!(tokens.len(), 16);
-        assert_eq!(tokens[0], Token::LeftParen);
-        assert_eq!(tokens[1], Token::RightParen);
-        assert_eq!(tokens[2], Token::LeftBrace);
-        assert_eq!(tokens[3], Token::RightBrace);
-        assert_eq!(tokens[4], Token::Comma);
-        assert_eq!(tokens[5], Token::Dot);
-        assert_eq!(tokens[6], Token::Minus);
-        assert_eq!(tokens[7], Token::Plus);
-        assert_eq!(tokens[8], Token::Semicolon);
-        assert_eq!(tokens[9], Token::Slash);
-        assert_eq!(tokens[10], Token::Star);
-        assert_eq!(tokens[11], Token::Bang);
-        assert_eq!(tokens[12], Token::Equal);
-        assert_eq!(tokens[13], Token::Less);
-        assert_eq!(tokens[14], Token::Greater);
-        assert_eq!(tokens[15], Token::EOF);
+        assert_eq!(tokens[0], TokenType::LeftParen);
+        assert_eq!(tokens[1], TokenType::RightParen);
+        assert_eq!(tokens[2], TokenType::LeftBrace);
+        assert_eq!(tokens[3], TokenType::RightBrace);
+        assert_eq!(tokens[4], TokenType::Comma);
+        assert_eq!(tokens[5], TokenType::Dot);
+        assert_eq!(tokens[6], TokenType::Minus);
+        assert_eq!(tokens[7], TokenType::Plus);
+        assert_eq!(tokens[8], TokenType::Semicolon);
+        assert_eq!(tokens[9], TokenType::Slash);
+        assert_eq!(tokens[10], TokenType::Star);
+        assert_eq!(tokens[11], TokenType::Bang);
+        assert_eq!(tokens[12], TokenType::Equal);
+        assert_eq!(tokens[13], TokenType::Less);
+        assert_eq!(tokens[14], TokenType::Greater);
+        assert_eq!(tokens[15], TokenType::EOF);
     }
 
     #[test]
     fn two_char_tokens() {
         let source = "!= == <= >=";
-        let tokens = get_tokens(source).unwrap();
+        let tokens = get_token_types(source);
         assert_eq!(tokens.len(), 5);
-        assert_eq!(tokens[0], Token::BangEqual);
-        assert_eq!(tokens[1], Token::EqualEqual);
-        assert_eq!(tokens[2], Token::LessEqual);
-        assert_eq!(tokens[3], Token::GreaterEqual);
-        assert_eq!(tokens[4], Token::EOF);
+        assert_eq!(tokens[0], TokenType::BangEqual);
+        assert_eq!(tokens[1], TokenType::EqualEqual);
+        assert_eq!(tokens[2], TokenType::LessEqual);
+        assert_eq!(tokens[3], TokenType::GreaterEqual);
+        assert_eq!(tokens[4], TokenType::EOF);
     }
 
     #[test]
     fn string_token() {
         let source = "\"hello world\"";
-        let tokens = get_tokens(source).unwrap();
+        let tokens = get_token_types(source);
         assert_eq!(tokens.len(), 2);
-        assert_eq!(tokens[0], Token::String("hello world".to_string()));
-        assert_eq!(tokens[1], Token::EOF);
+        assert_eq!(tokens[0], TokenType::String("hello world".to_string()));
+        assert_eq!(tokens[1], TokenType::EOF);
     }
 
     #[test]
     fn trivia_is_ignored() {
         let source = "   \n\t // This is a comment\n";
-        let tokens = get_tokens(source).unwrap();
+        let tokens = get_token_types(source);
         assert_eq!(tokens.len(), 1);
-        assert_eq!(tokens[0], Token::EOF);
+        assert_eq!(tokens[0], TokenType::EOF);
     }
 
     #[test]
     fn numbers_without_decimal_point() {
         let source = "1234";
-        let tokens = get_tokens(source).unwrap();
+        let tokens = get_token_types(source);
         assert_eq!(tokens.len(), 2);
-        assert_eq!(tokens[0], Token::Number(1234.0));
-        assert_eq!(tokens[1], Token::EOF);
+        assert_eq!(tokens[0], TokenType::Number(1234.0));
+        assert_eq!(tokens[1], TokenType::EOF);
     }
 
     #[test]
     fn numbers_with_decimal_point() {
         let source = "123.4";
-        let tokens = get_tokens(source).unwrap();
+        let tokens = get_token_types(source);
         assert_eq!(tokens.len(), 2);
-        assert_eq!(tokens[0], Token::Number(123.4));
-        assert_eq!(tokens[1], Token::EOF);
+        assert_eq!(tokens[0], TokenType::Number(123.4));
+        assert_eq!(tokens[1], TokenType::EOF);
     }
 
     #[test]
     fn keywords() {
         let source =
             "and class else false for fun if nil or print return super this true var while";
-        let tokens = get_tokens(source).unwrap();
+        let tokens = get_token_types(source);
         assert_eq!(tokens.len(), 17);
-        assert_eq!(tokens[0], Token::And);
-        assert_eq!(tokens[1], Token::Class);
-        assert_eq!(tokens[2], Token::Else);
-        assert_eq!(tokens[3], Token::False);
-        assert_eq!(tokens[4], Token::For);
-        assert_eq!(tokens[5], Token::Fun);
-        assert_eq!(tokens[6], Token::If);
-        assert_eq!(tokens[7], Token::Nil);
-        assert_eq!(tokens[8], Token::Or);
-        assert_eq!(tokens[9], Token::Print);
-        assert_eq!(tokens[10], Token::Return);
-        assert_eq!(tokens[11], Token::Super);
-        assert_eq!(tokens[12], Token::This);
-        assert_eq!(tokens[13], Token::True);
-        assert_eq!(tokens[14], Token::Var);
-        assert_eq!(tokens[15], Token::While);
-        assert_eq!(tokens[16], Token::EOF);
+        assert_eq!(tokens[0], TokenType::And);
+        assert_eq!(tokens[1], TokenType::Class);
+        assert_eq!(tokens[2], TokenType::Else);
+        assert_eq!(tokens[3], TokenType::False);
+        assert_eq!(tokens[4], TokenType::For);
+        assert_eq!(tokens[5], TokenType::Fun);
+        assert_eq!(tokens[6], TokenType::If);
+        assert_eq!(tokens[7], TokenType::Nil);
+        assert_eq!(tokens[8], TokenType::Or);
+        assert_eq!(tokens[9], TokenType::Print);
+        assert_eq!(tokens[10], TokenType::Return);
+        assert_eq!(tokens[11], TokenType::Super);
+        assert_eq!(tokens[12], TokenType::This);
+        assert_eq!(tokens[13], TokenType::True);
+        assert_eq!(tokens[14], TokenType::Var);
+        assert_eq!(tokens[15], TokenType::While);
+        assert_eq!(tokens[16], TokenType::EOF);
     }
 
     #[test]
     fn identifier() {
         let source = "myVariable foo123 bar";
-        let tokens = get_tokens(source).unwrap();
+        let tokens = get_token_types(source);
         assert_eq!(tokens.len(), 4);
-        assert_eq!(tokens[0], Token::Identifier("myVariable".to_string()));
-        assert_eq!(tokens[1], Token::Identifier("foo123".to_string()));
-        assert_eq!(tokens[2], Token::Identifier("bar".to_string()));
-        assert_eq!(tokens[3], Token::EOF);
+        assert_eq!(tokens[0], TokenType::Identifier("myVariable".to_string()));
+        assert_eq!(tokens[1], TokenType::Identifier("foo123".to_string()));
+        assert_eq!(tokens[2], TokenType::Identifier("bar".to_string()));
+        assert_eq!(tokens[3], TokenType::EOF);
+    }
+
+    fn get_token_types(program: &str) -> Vec<TokenType> {
+        get_tokens(program)
+            .unwrap()
+            .into_iter()
+            .map(|token| token.token_type)
+            .collect()
     }
 }

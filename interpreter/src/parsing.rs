@@ -1,6 +1,6 @@
 use crate::{
-    expressions::{BinaryOperator, Expression, Literal, UnaryOperator},
-    scanning::Token,
+    expressions::{BinaryOperator, Expression, ExpressionType, Literal, UnaryOperator},
+    scanning::{Token, TokenType},
     statements::Statement,
 };
 
@@ -12,11 +12,16 @@ pub fn parse(tokens: &[Token]) -> Vec<Statement> {
 struct Parser<'a> {
     tokens: &'a [Token],
     curr: usize,
+    next_id: u32,
 }
 
 impl Parser<'_> {
     fn new(tokens: &'_ [Token]) -> Parser<'_> {
-        Parser { tokens, curr: 0 }
+        Parser {
+            tokens,
+            curr: 0,
+            next_id: 1,
+        }
     }
 
     fn parse(&mut self) -> Vec<Statement> {
@@ -32,7 +37,7 @@ impl Parser<'_> {
     }
 
     fn declaration(&mut self) -> Option<Statement> {
-        let statement = if let Some(Token::Var) = self.curr_token() {
+        let statement = if let Some(TokenType::Var) = self.curr_token_type() {
             self.advance();
             self.var_declaration()
         } else {
@@ -50,47 +55,47 @@ impl Parser<'_> {
     }
 
     fn var_declaration(&mut self) -> Result<Statement, ParsingError> {
-        let name = match self.curr_token() {
-            Some(Token::Identifier(n)) => n.clone(),
+        let name = match self.curr_token_type() {
+            Some(TokenType::Identifier(n)) => n.clone(),
             _ => return Err(self.unexpected_token("semicolon")),
         };
 
         self.advance();
 
         let mut initializer = None;
-        if let Some(Token::Equal) = self.curr_token() {
+        if let Some(TokenType::Equal) = self.curr_token_type() {
             self.advance();
             initializer = Some(self.expression()?);
         }
 
-        self.consume(Token::Semicolon, "semicolon")?;
+        self.consume(TokenType::Semicolon, "semicolon")?;
         Ok(Statement::Variable { name, initializer })
     }
 
     fn statement(&mut self) -> Result<Statement, ParsingError> {
-        match self.curr_token() {
-            Some(Token::Print) => {
+        match self.curr_token().map(|t| &t.token_type) {
+            Some(TokenType::Print) => {
                 self.advance();
                 self.print_statement()
             }
-            Some(Token::LeftBrace) => Ok(Statement::Block(self.block()?)),
-            Some(Token::If) => {
+            Some(TokenType::LeftBrace) => Ok(Statement::Block(self.block()?)),
+            Some(TokenType::If) => {
                 self.advance();
                 self.if_statement()
             }
-            Some(Token::While) => {
+            Some(TokenType::While) => {
                 self.advance();
                 self.while_statement()
             }
-            Some(Token::For) => {
+            Some(TokenType::For) => {
                 self.advance();
                 self.for_statement()
             }
-            Some(Token::Fun) => {
+            Some(TokenType::Fun) => {
                 self.advance();
                 self.function()
             }
-            Some(Token::Return) => {
+            Some(TokenType::Return) => {
                 self.advance();
                 self.return_statement()
             }
@@ -99,13 +104,13 @@ impl Parser<'_> {
     }
 
     fn return_statement(&mut self) -> Result<Statement, ParsingError> {
-        if let Some(Token::Semicolon) = self.curr_token() {
+        if let Some(TokenType::Semicolon) = self.curr_token_type() {
             self.advance();
             Ok(Statement::Return(None))
         } else {
             let expr = self.expression()?;
             self.consume(
-                Token::Semicolon,
+                TokenType::Semicolon,
                 "expected semicolon after return expression",
             )?;
             Ok(Statement::Return(Some(expr)))
@@ -113,22 +118,27 @@ impl Parser<'_> {
     }
 
     fn function(&mut self) -> Result<Statement, ParsingError> {
-        let Some(Token::Identifier(name)) = self.curr_token() else {
+        let Some(Token {
+            token_type: TokenType::Identifier(name),
+            ..
+        }) = self.curr_token()
+        else {
             return Err(self.unexpected_token("identifier"));
         };
         let name = name.clone();
+
         self.advance();
 
-        self.consume(Token::LeftParen, "(")?;
+        self.consume(TokenType::LeftParen, "(")?;
         let mut params = vec![];
 
-        if self.curr_token() != Some(&Token::RightParen) {
+        if self.curr_token_type() != Some(&TokenType::RightParen) {
             loop {
                 if params.len() >= 255 {
                     return Err(ParsingError::TooManyArguments);
                 }
 
-                if let Some(Token::Identifier(name)) = self.curr_token() {
+                if let Some(TokenType::Identifier(name)) = self.curr_token_type() {
                     params.push(name.clone());
                     self.advance();
                 } else {
@@ -137,7 +147,7 @@ impl Parser<'_> {
                     )));
                 }
 
-                if self.curr_token() == Some(&Token::Comma) {
+                if self.curr_token_type() == Some(&TokenType::Comma) {
                     self.advance();
                 } else {
                     break;
@@ -145,7 +155,7 @@ impl Parser<'_> {
             }
         }
         self.consume(
-            Token::RightParen,
+            TokenType::RightParen,
             "expected ) at the end of function parameter list",
         )?;
         let body = self.block()?;
@@ -154,38 +164,38 @@ impl Parser<'_> {
     }
 
     fn for_statement(&mut self) -> Result<Statement, ParsingError> {
-        self.consume(Token::LeftParen, "(")?;
+        self.consume(TokenType::LeftParen, "(")?;
 
-        let initializer = match self.curr_token() {
-            Some(Token::Semicolon) => {
+        let initializer = match self.curr_token_type() {
+            Some(TokenType::Semicolon) => {
                 self.advance();
                 None
             }
-            Some(Token::Var) => {
+            Some(TokenType::Var) => {
                 self.advance();
                 Some(self.var_declaration()?)
             }
             _ => Some(self.expression_statement()?),
         };
 
-        let condition = match self.curr_token() {
-            Some(Token::Semicolon) => None,
+        let condition = match self.curr_token_type() {
+            Some(TokenType::Semicolon) => None,
             _ => Some(self.expression()?),
         };
-        self.consume(Token::Semicolon, "semicolon")?;
+        self.consume(TokenType::Semicolon, "semicolon")?;
 
-        let increment = match self.curr_token() {
-            Some(Token::RightParen) => None,
+        let increment = match self.curr_token_type() {
+            Some(TokenType::RightParen) => None,
             _ => Some(self.expression()?),
         };
-        self.consume(Token::RightParen, ")")?;
+        self.consume(TokenType::RightParen, ")")?;
 
         let body = self.statement()?;
 
         let loop_stmt = Statement::While {
             condition: match condition {
                 Some(expr) => expr,
-                None => Expression::Literal(Literal::Boolean(true)),
+                None => self.make_expr(ExpressionType::Literal(Literal::Boolean(true))),
             },
             stmt: Box::new(match increment {
                 Some(expr) => Statement::Block(vec![body, Statement::Expression(expr)]),
@@ -200,9 +210,9 @@ impl Parser<'_> {
     }
 
     fn while_statement(&mut self) -> Result<Statement, ParsingError> {
-        self.consume(Token::LeftParen, "(")?;
+        self.consume(TokenType::LeftParen, "(")?;
         let condition = self.expression()?;
-        self.consume(Token::RightParen, ")")?;
+        self.consume(TokenType::RightParen, ")")?;
 
         let stmt = Box::new(self.statement()?);
 
@@ -210,13 +220,13 @@ impl Parser<'_> {
     }
 
     fn if_statement(&mut self) -> Result<Statement, ParsingError> {
-        self.consume(Token::LeftParen, "(")?;
+        self.consume(TokenType::LeftParen, "(")?;
         let condition = self.expression()?;
-        self.consume(Token::RightParen, ")")?;
+        self.consume(TokenType::RightParen, ")")?;
 
         let then_branch = Box::new(self.statement()?);
 
-        let else_branch = if let Some(Token::Else) = self.curr_token() {
+        let else_branch = if let Some(TokenType::Else) = self.curr_token_type() {
             self.advance();
             Some(Box::new(self.statement()?))
         } else {
@@ -231,45 +241,49 @@ impl Parser<'_> {
     }
 
     fn block(&mut self) -> Result<Vec<Statement>, ParsingError> {
-        self.consume(Token::LeftBrace, "expected { at the start of a block")?;
+        self.consume(TokenType::LeftBrace, "expected { at the start of a block")?;
 
         let mut statements = Vec::new();
 
-        while !self.is_at_end() && self.curr_token() != Some(&Token::RightBrace) {
+        while !self.is_at_end() && self.curr_token_type() != Some(&TokenType::RightBrace) {
             if let Some(stmt) = self.declaration() {
                 statements.push(stmt)
             }
         }
 
-        self.consume(Token::RightBrace, "expected } at the end of a block")?;
+        self.consume(TokenType::RightBrace, "expected } at the end of a block")?;
         Ok(statements)
     }
 
     fn print_statement(&mut self) -> Result<Statement, ParsingError> {
         let expr = self.expression()?;
 
-        self.consume(Token::Semicolon, "semicolon")?;
+        self.consume(TokenType::Semicolon, "semicolon")?;
         Ok(Statement::Print(expr))
     }
 
     fn expression_statement(&mut self) -> Result<Statement, ParsingError> {
         let expr = self.expression()?;
-        self.consume(Token::Semicolon, "semicolon")?;
+        self.consume(TokenType::Semicolon, "semicolon")?;
         Ok(Statement::Expression(expr))
     }
 
     fn assignment(&mut self) -> Result<Expression, ParsingError> {
         let expr = self.or()?;
 
-        if let Some(Token::Equal) = self.curr_token() {
+        if let Some(TokenType::Equal) = self.curr_token_type() {
             self.advance();
             let value = self.assignment()?;
 
-            let Expression::Variable(name) = expr else {
+            let ExpressionType::Variable(name) = *expr.expr_type else {
                 return Err(ParsingError::IllegalAssignmentTarget);
             };
 
-            Ok(Expression::Assign(name, Box::new(value)))
+            Ok(self.make_expr_with_line(
+                ExpressionType::Assign(name, Box::new(value)),
+                expr.line
+                    .expect("expression should have line in source code"),
+            ))
         } else {
             Ok(expr)
         }
@@ -278,11 +292,19 @@ impl Parser<'_> {
     fn or(&mut self) -> Result<Expression, ParsingError> {
         let mut expr = self.and()?;
 
-        while let Some(Token::Or) = self.curr_token() {
+        while let Some(Token {
+            line,
+            token_type: TokenType::Or,
+        }) = self.curr_token()
+        {
+            let line = *line;
             self.advance();
 
             let right = self.expression()?;
-            expr = Expression::LogicalOr(Box::new(expr), Box::new(right))
+            expr = self.make_expr_with_line(
+                ExpressionType::LogicalOr(Box::new(expr), Box::new(right)),
+                line,
+            )
         }
 
         Ok(expr)
@@ -291,11 +313,19 @@ impl Parser<'_> {
     fn and(&mut self) -> Result<Expression, ParsingError> {
         let mut expr = self.equality()?;
 
-        while let Some(Token::And) = self.curr_token() {
+        while let Some(Token {
+            line,
+            token_type: TokenType::And,
+        }) = self.curr_token()
+        {
+            let line = *line;
             self.advance();
 
             let right = self.expression()?;
-            expr = Expression::LogicalAnd(Box::new(expr), Box::new(right))
+            expr = self.make_expr_with_line(
+                ExpressionType::LogicalAnd(Box::new(expr), Box::new(right)),
+                line,
+            )
         }
 
         Ok(expr)
@@ -308,16 +338,24 @@ impl Parser<'_> {
     fn equality(&mut self) -> Result<Expression, ParsingError> {
         let mut expression = self.comparison()?;
 
-        while let Some(operator @ (Token::BangEqual | Token::EqualEqual)) = self.curr_token() {
+        while let Some(Token {
+            line,
+            token_type: operator @ (TokenType::BangEqual | TokenType::EqualEqual),
+        }) = self.curr_token()
+        {
+            let line = *line;
             let operator = match operator {
-                Token::BangEqual => BinaryOperator::BangEqual,
+                TokenType::BangEqual => BinaryOperator::BangEqual,
                 _ => BinaryOperator::EqualEqual,
             };
 
             self.advance();
 
             let right = self.comparison()?;
-            expression = Expression::Binary(Box::new(expression), operator, Box::new(right));
+            expression = self.make_expr_with_line(
+                ExpressionType::Binary(Box::new(expression), operator, Box::new(right)),
+                line,
+            );
         }
 
         Ok(expression)
@@ -326,21 +364,30 @@ impl Parser<'_> {
     fn comparison(&mut self) -> Result<Expression, ParsingError> {
         let mut expression = self.term()?;
 
-        while let Some(
-            operator @ (Token::Greater | Token::GreaterEqual | Token::Less | Token::LessEqual),
-        ) = self.curr_token()
+        while let Some(Token {
+            line,
+            token_type:
+                operator @ (TokenType::Greater
+                | TokenType::GreaterEqual
+                | TokenType::Less
+                | TokenType::LessEqual),
+        }) = self.curr_token()
         {
+            let line = *line;
             let operator = match operator {
-                Token::Greater => BinaryOperator::Greater,
-                Token::GreaterEqual => BinaryOperator::GreaterEqual,
-                Token::Less => BinaryOperator::Less,
+                TokenType::Greater => BinaryOperator::Greater,
+                TokenType::GreaterEqual => BinaryOperator::GreaterEqual,
+                TokenType::Less => BinaryOperator::Less,
                 _ => BinaryOperator::LessEqual,
             };
 
             self.advance();
 
             let right = self.term()?;
-            expression = Expression::Binary(Box::new(expression), operator, Box::new(right));
+            expression = self.make_expr_with_line(
+                ExpressionType::Binary(Box::new(expression), operator, Box::new(right)),
+                line,
+            );
         }
 
         Ok(expression)
@@ -349,16 +396,24 @@ impl Parser<'_> {
     fn term(&mut self) -> Result<Expression, ParsingError> {
         let mut expression = self.factor()?;
 
-        while let Some(operator @ (Token::Minus | Token::Plus)) = self.curr_token() {
+        while let Some(Token {
+            token_type: operator @ (TokenType::Minus | TokenType::Plus),
+            line,
+        }) = self.curr_token()
+        {
+            let line = *line;
             let operator = match operator {
-                Token::Minus => BinaryOperator::Minus,
+                TokenType::Minus => BinaryOperator::Minus,
                 _ => BinaryOperator::Plus,
             };
 
             self.advance();
 
             let right = self.factor()?;
-            expression = Expression::Binary(Box::new(expression), operator, Box::new(right));
+            expression = self.make_expr_with_line(
+                ExpressionType::Binary(Box::new(expression), operator, Box::new(right)),
+                line,
+            );
         }
 
         Ok(expression)
@@ -367,30 +422,43 @@ impl Parser<'_> {
     fn factor(&mut self) -> Result<Expression, ParsingError> {
         let mut expression = self.unary()?;
 
-        while let Some(operator @ (Token::Slash | Token::Star)) = self.curr_token() {
+        while let Some(Token {
+            token_type: operator @ (TokenType::Slash | TokenType::Star),
+            line,
+        }) = self.curr_token()
+        {
+            let line = *line;
             let operator = match operator {
-                Token::Slash => BinaryOperator::Slash,
+                TokenType::Slash => BinaryOperator::Slash,
                 _ => BinaryOperator::Star,
             };
 
             self.advance();
 
             let right = self.factor()?;
-            expression = Expression::Binary(Box::new(expression), operator, Box::new(right));
+            expression = self.make_expr_with_line(
+                ExpressionType::Binary(Box::new(expression), operator, Box::new(right)),
+                line,
+            );
         }
 
         Ok(expression)
     }
 
     fn unary(&mut self) -> Result<Expression, ParsingError> {
-        if let Some(operator @ (Token::Bang | Token::Minus)) = self.curr_token() {
+        if let Some(Token {
+            token_type: operator @ (TokenType::Bang | TokenType::Minus),
+            line,
+        }) = self.curr_token()
+        {
+            let line = *line;
             let operator = match operator {
-                Token::Bang => UnaryOperator::Bang,
+                TokenType::Bang => UnaryOperator::Bang,
                 _ => UnaryOperator::Minus,
             };
             self.advance();
             let right = self.unary()?;
-            Ok(Expression::Unary(operator, Box::new(right)))
+            Ok(self.make_expr_with_line(ExpressionType::Unary(operator, Box::new(right)), line))
         } else {
             self.call()
         }
@@ -400,28 +468,35 @@ impl Parser<'_> {
         let mut expr = self.primary()?;
 
         loop {
-            if self.curr_token() == Some(&Token::LeftParen) {
-                self.advance();
-                expr = self.finish_call(expr)?;
-            } else {
-                break;
+            match self.curr_token() {
+                Some(Token {
+                    token_type: TokenType::LeftParen,
+                    line,
+                }) => {
+                    let line = *line;
+                    self.advance();
+                    expr = self.finish_call(expr, line)?;
+                }
+                _ => {
+                    break;
+                }
             }
         }
 
         Ok(expr)
     }
 
-    fn finish_call(&mut self, callee: Expression) -> Result<Expression, ParsingError> {
+    fn finish_call(&mut self, callee: Expression, line: usize) -> Result<Expression, ParsingError> {
         let mut args = vec![];
 
-        if self.curr_token() != Some(&Token::RightParen) {
+        if self.curr_token_type() != Some(&TokenType::RightParen) {
             loop {
                 if args.len() >= 255 {
                     return Err(ParsingError::TooManyArguments);
                 }
                 args.push(self.expression()?);
 
-                if self.curr_token() == Some(&Token::Comma) {
+                if self.curr_token_type() == Some(&TokenType::Comma) {
                     self.advance();
                 } else {
                     break;
@@ -429,41 +504,53 @@ impl Parser<'_> {
             }
         }
 
-        self.consume(Token::RightParen, ")")?;
+        self.consume(TokenType::RightParen, ")")?;
 
-        Ok(Expression::Call {
-            callee: Box::new(callee),
-            args,
-        })
+        Ok(self.make_expr_with_line(
+            ExpressionType::Call {
+                callee: Box::new(callee),
+                args,
+            },
+            line,
+        ))
     }
 
     fn primary(&mut self) -> Result<Expression, ParsingError> {
-        if let Some(
-            token @ (Token::True | Token::False | Token::Nil | Token::Number(_) | Token::String(_)),
-        ) = self.curr_token()
-        {
-            let literal = match token {
-                Token::False => Literal::Boolean(false),
-                Token::True => Literal::Boolean(true),
-                Token::Nil => Literal::Nil,
-                Token::Number(number) => Literal::Number(*number),
-                Token::String(str) => Literal::String(str.clone()),
-                _ => unreachable!(),
-            };
-            self.advance();
-            Ok(Expression::Literal(literal))
-        } else if let Some(Token::Identifier(name)) = self.curr_token() {
-            let name = name.clone();
-            self.advance();
-            Ok(Expression::Variable(name))
-        } else if let Some(Token::LeftParen) = self.curr_token() {
-            self.advance();
-            let expr = self.expression()?;
+        let Some(Token { token_type, line }) = self.curr_token() else {
+            return Err(self.unexpected_token("primary token"));
+        };
+        let line = *line;
 
-            self.consume(Token::RightParen, ")")?;
-            Ok(Expression::Grouping(Box::new(expr)))
-        } else {
-            Err(self.unexpected_token("primary token"))
+        match token_type {
+            TokenType::True
+            | TokenType::False
+            | TokenType::Nil
+            | TokenType::Number(_)
+            | TokenType::String(_) => {
+                let literal = match token_type {
+                    TokenType::False => Literal::Boolean(false),
+                    TokenType::True => Literal::Boolean(true),
+                    TokenType::Nil => Literal::Nil,
+                    TokenType::Number(number) => Literal::Number(*number),
+                    TokenType::String(str) => Literal::String(str.clone()),
+                    _ => unreachable!(),
+                };
+                self.advance();
+                Ok(self.make_expr_with_line(ExpressionType::Literal(literal), line))
+            }
+            TokenType::Identifier(name) => {
+                let name = name.clone();
+                self.advance();
+                Ok(self.make_expr_with_line(ExpressionType::Variable(name), line))
+            }
+            TokenType::LeftParen => {
+                self.advance();
+                let expr = self.expression()?;
+
+                self.consume(TokenType::RightParen, ")")?;
+                Ok(self.make_expr_with_line(ExpressionType::Grouping(Box::new(expr)), line))
+            }
+            _ => Err(self.unexpected_token("primary token")),
         }
     }
 
@@ -471,21 +558,50 @@ impl Parser<'_> {
         self.tokens.get(self.curr)
     }
 
+    fn curr_token_type(&self) -> Option<&TokenType> {
+        self.tokens.get(self.curr).map(|t| &t.token_type)
+    }
+
     fn advance(&mut self) {
         self.curr += 1;
     }
 
-    fn consume(&mut self, expected_token: Token, error_msg: &str) -> Result<(), ParsingError> {
-        if self.curr_token() != Some(&expected_token) {
-            Err(ParsingError::UnexpectedToken(format!(
+    fn consume(&mut self, expected_token: TokenType, error_msg: &str) -> Result<(), ParsingError> {
+        match self.curr_token() {
+            Some(token) if token.token_type == expected_token => {
+                self.advance();
+                Ok(())
+            }
+            _ => Err(ParsingError::UnexpectedToken(format!(
                 "{}, got {:?}",
                 error_msg.to_string(),
                 self.curr_token()
-            )))
-        } else {
-            self.advance();
-            Ok(())
+            ))),
         }
+    }
+
+    fn make_expr(&mut self, expr_type: ExpressionType) -> Expression {
+        let expr = Expression {
+            id: self.next_id,
+            line: None,
+            expr_type: Box::new(expr_type),
+        };
+
+        self.next_id += 1;
+
+        expr
+    }
+
+    fn make_expr_with_line(&mut self, expr_type: ExpressionType, line: usize) -> Expression {
+        let expr = Expression {
+            id: self.next_id,
+            line: Some(line),
+            expr_type: Box::new(expr_type),
+        };
+
+        self.next_id += 1;
+
+        expr
     }
 
     fn unexpected_token(&self, expected_token: &str) -> ParsingError {
@@ -500,21 +616,27 @@ impl Parser<'_> {
         self.advance();
 
         while !self.is_at_end() {
-            if self.tokens.get(self.curr - 1) == Some(&Token::Semicolon) {
+            if self
+                .tokens
+                .get(self.curr - 1)
+                .is_some_and(|t| t.token_type == TokenType::Semicolon)
+            {
                 return;
             }
 
             match self.curr_token() {
-                Some(
-                    Token::Class
-                    | Token::Fun
-                    | Token::Var
-                    | Token::For
-                    | Token::If
-                    | Token::While
-                    | Token::Print
-                    | Token::Return,
-                ) => return,
+                Some(Token {
+                    token_type:
+                        TokenType::Class
+                        | TokenType::Fun
+                        | TokenType::Var
+                        | TokenType::For
+                        | TokenType::If
+                        | TokenType::While
+                        | TokenType::Print
+                        | TokenType::Return,
+                    ..
+                }) => return,
                 _ => (),
             }
 
@@ -523,7 +645,10 @@ impl Parser<'_> {
     }
 
     fn is_at_end(&mut self) -> bool {
-        self.curr_token() == None || self.curr_token() == Some(&Token::EOF)
+        match self.curr_token_type() {
+            Some(TokenType::EOF) | None => true,
+            _ => false,
+        }
     }
 }
 

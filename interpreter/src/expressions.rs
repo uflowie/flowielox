@@ -1,7 +1,7 @@
 use std::fmt::Display;
 
 #[derive(Debug, PartialEq, Clone)]
-pub enum Expression {
+pub enum ExpressionType {
     Assign(String, Box<Expression>),
     Unary(UnaryOperator, Box<Expression>),
     Binary(Box<Expression>, BinaryOperator, Box<Expression>),
@@ -14,6 +14,13 @@ pub enum Expression {
         callee: Box<Expression>,
         args: Vec<Expression>,
     },
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct Expression {
+    pub id: u32,
+    pub line: Option<usize>, // option, because not every expression comes from source code, eg expressions created during desugaring
+    pub expr_type: Box<ExpressionType>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,6 +49,12 @@ pub enum Literal {
     String(String),
     Boolean(bool),
     Nil,
+}
+
+impl Display for Expression {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.expr_type.fmt(f)
+    }
 }
 
 impl Display for BinaryOperator {
@@ -82,7 +95,7 @@ impl Display for Literal {
     }
 }
 
-impl Display for Expression {
+impl Display for ExpressionType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Assign(name, expression) => write!(f, "({} = {})", name, expression),
@@ -106,18 +119,26 @@ mod tests {
 
     #[test]
     fn debug_expression() {
-        let expression = Expression::Binary(
-            Box::new(Expression::Unary(
+        let expression = ExpressionType::Binary(
+            make_expr_without_metadata(ExpressionType::Unary(
                 UnaryOperator::Minus,
-                Box::new(Expression::Literal(Literal::Number(123.0))),
+                make_expr_without_metadata(ExpressionType::Literal(Literal::Number(123.0))),
             )),
             BinaryOperator::Star,
-            Box::new(Expression::Grouping(Box::new(Expression::Literal(
-                Literal::Number(45.67),
-            )))),
+            make_expr_without_metadata(ExpressionType::Grouping(make_expr_without_metadata(
+                ExpressionType::Literal(Literal::Number(45.67)),
+            ))),
         );
 
         let output = format!("{}", expression);
         assert_eq!(output, "(* (- 123) (group 45.67))");
+    }
+
+    fn make_expr_without_metadata(expr_type: ExpressionType) -> Box<Expression> {
+        Box::new(Expression {
+            expr_type: Box::new(expr_type),
+            id: 0,
+            line: None,
+        })
     }
 }
