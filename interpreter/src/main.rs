@@ -6,11 +6,12 @@ use std::{
 mod expressions;
 mod interpreting;
 mod parsing;
+mod resolver;
 mod scanning;
 mod statements;
 use scanning::get_tokens;
 
-use crate::{interpreting::interpret, parsing::parse};
+use crate::{interpreting::interpret, parsing::parse, resolver::resolve};
 
 fn main() {
     let args: Vec<_> = args().collect();
@@ -49,5 +50,6 @@ fn run(program: &str) {
     };
 
     let statements = parse(&tokens);
-    interpret(&statements).unwrap();
+    let resolved = resolve(&statements).unwrap();
+    interpret(&statements, &resolved).unwrap();
 }

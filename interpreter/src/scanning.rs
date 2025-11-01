@@ -138,8 +138,6 @@ pub fn get_tokens(program: &str) -> Result<Vec<Token>, ScanningError> {
         line,
     });
 
-    println!("tokens: {:?}", tokens);
-
     if has_error {
         Err(ScanningError::Error)
     } else {

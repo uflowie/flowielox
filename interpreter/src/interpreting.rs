@@ -8,10 +8,16 @@ use crate::{
     statements::Statement,
 };
 
-pub fn interpret(statements: &[Statement]) -> Result<(), EvaluationError> {
-    let mut interpreter = Interpreter::new(statements);
+pub fn interpret(
+    statements: &[Statement],
+    resolved: &HashMap<u32, usize>,
+) -> Result<(), EvaluationError> {
+    let mut interpreter = Interpreter {
+        statements,
+        resolved,
+        environments: Environments::new(),
+    };
 
-    // before we start interpreting anything, anything will be defined in the
     let global = &mut interpreter.environments;
     global.define(String::from("clock"), Value::NativeFunction(|_| clock()));
 
@@ -30,16 +36,10 @@ fn clock() -> Value {
 struct Interpreter<'a> {
     environments: Environments,
     statements: &'a [Statement],
+    resolved: &'a HashMap<u32, usize>,
 }
 
 impl<'a> Interpreter<'a> {
-    fn new(statements: &'a [Statement]) -> Self {
-        Self {
-            environments: Environments::new(),
-            statements,
-        }
-    }
-
     fn interpret(mut self) -> Result<(), EvaluationError> {
         for statement in self.statements {
             self.execute(statement)?;
@@ -188,12 +188,15 @@ impl<'a> Interpreter<'a> {
             ExpressionType::Grouping(expression) => self.evaluate(&expression),
             ExpressionType::Variable(name) => self
                 .environments
-                .get(&name)
+                .get(&name, self.get_distance(expr))
                 .cloned()
                 .ok_or(EvaluationError::UndefinedVariable),
-            ExpressionType::Assign(name, expr) => {
-                let value = self.evaluate(&expr)?;
-                match self.environments.assign(&name, &value) {
+            ExpressionType::Assign(name, value_expr) => {
+                let value = self.evaluate(&value_expr)?;
+                match self
+                    .environments
+                    .assign(&name, &value, self.get_distance(expr))
+                {
                     Ok(()) => Ok(value),
                     Err(err) => Err(err),
                 }
@@ -250,6 +253,10 @@ impl<'a> Interpreter<'a> {
             }
             _ => Err(EvaluationError::InvalidCalleeType),
         }
+    }
+
+    fn get_distance(&self, expr: &Expression) -> Option<usize> {
+        self.resolved.get(&expr.id).copied()
     }
 }
 
@@ -323,9 +330,14 @@ impl Environments {
         self.envs[self.curr].values.insert(key, value);
     }
 
-    fn assign(&mut self, key: &str, value: &Value) -> Result<(), EvaluationError> {
+    fn assign(
+        &mut self,
+        key: &str,
+        value: &Value,
+        dist: Option<usize>,
+    ) -> Result<(), EvaluationError> {
         let id = self
-            .find_id_of_env_containing_key(key)
+            .get_id_of_ancestor(dist)
             .ok_or(EvaluationError::UndefinedVariable)?;
 
         let slot = self.envs[id].values.get_mut(key).expect(
@@ -336,8 +348,8 @@ impl Environments {
         Ok(())
     }
 
-    fn get(&self, key: &str) -> Option<&Value> {
-        let id = self.find_id_of_env_containing_key(key)?;
+    fn get(&self, key: &str, dist: Option<usize>) -> Option<&Value> {
+        let id = self.get_id_of_ancestor(dist)?;
         self.envs[id].values.get(key)
     }
 
@@ -352,16 +364,20 @@ impl Environments {
             .expect("did not expect root scope to be closed")
     }
 
-    fn find_id_of_env_containing_key(&self, key: &str) -> Option<usize> {
-        let mut curr_id = Some(self.curr);
+    fn get_id_of_ancestor(&self, dist: Option<usize>) -> Option<usize> {
+        match dist {
+            Some(dist) => {
+                let mut curr_id = Some(self.curr);
 
-        while let Some(id) = curr_id {
-            if self.envs[id].values.contains_key(key) {
-                return curr_id;
+                for _ in 0..dist {
+                    curr_id = self.envs
+                        [curr_id.expect("resolver should have caught undefined variables")]
+                    .parent_id
+                }
+
+                curr_id
             }
-            curr_id = self.envs[id].parent_id;
+            None => Some(0),
         }
-
-        return None;
     }
 }
