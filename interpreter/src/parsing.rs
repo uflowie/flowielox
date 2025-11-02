@@ -84,6 +84,24 @@ impl Parser<'_> {
         let name = name.clone();
         self.advance();
 
+        let mut superclass = None;
+
+        if self.curr_token_type() == Some(&TokenType::Less) {
+            self.advance();
+
+            let Some(Token {
+                token_type: TokenType::Identifier(name),
+                line,
+            }) = self.curr_token()
+            else {
+                return Err(self.unexpected_token("identifier after superclass"));
+            };
+            let name = name.clone();
+            let line = *line;
+            self.advance();
+            superclass = Some(self.make_expr_with_line(ExpressionType::Variable(name), line));
+        }
+
         self.consume(TokenType::LeftBrace, "left brace before class body")?;
 
         let mut methods = vec![];
@@ -94,7 +112,11 @@ impl Parser<'_> {
 
         self.consume(TokenType::RightBrace, "right brace after class body")?;
 
-        Ok(Statement::Class(ClassStatement { name, methods }))
+        Ok(Statement::Class(ClassStatement {
+            name,
+            methods,
+            superclass,
+        }))
     }
 
     fn statement(&mut self) -> Result<Statement, ParsingError> {
@@ -308,7 +330,7 @@ impl Parser<'_> {
                 .line
                 .expect("expression should have line in source code");
 
-            match *expr.expr_type {
+            match expr.expr_type {
                 ExpressionType::Variable(name) => {
                     let assign = self
                         .make_expr_with_line(ExpressionType::Assign(name, Box::new(value)), line);
@@ -617,6 +639,18 @@ impl Parser<'_> {
                 self.consume(TokenType::RightParen, ")")?;
                 Ok(self.make_expr_with_line(ExpressionType::Grouping(Box::new(expr)), line))
             }
+            TokenType::Super => {
+                self.advance();
+                self.consume(TokenType::Dot, "'.' after 'super'")?;
+
+                let Some(TokenType::Identifier(name)) = self.curr_token_type() else {
+                    return Err(self.unexpected_token("superclass method name"));
+                };
+                let name = name.clone();
+                self.advance();
+
+                Ok(self.make_expr_with_line(ExpressionType::Super(name), line))
+            }
             _ => Err(self.unexpected_token("primary token")),
         }
     }
@@ -647,7 +681,7 @@ impl Parser<'_> {
         let expr = Expression {
             id: self.next_id,
             line: None,
-            expr_type: Box::new(expr_type),
+            expr_type,
         };
 
         self.next_id += 1;
@@ -659,7 +693,7 @@ impl Parser<'_> {
         let expr = Expression {
             id: self.next_id,
             line: Some(line),
-            expr_type: Box::new(expr_type),
+            expr_type,
         };
 
         self.next_id += 1;
@@ -717,6 +751,7 @@ impl Parser<'_> {
 
 #[derive(Debug)]
 enum ParsingError {
+    #[allow(dead_code)]
     UnexpectedToken(String),
     IllegalAssignmentTarget,
     TooManyArguments,

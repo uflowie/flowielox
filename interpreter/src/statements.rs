@@ -35,6 +35,7 @@ pub struct FunctionStatement {
 pub struct ClassStatement {
     pub name: String,
     pub methods: Vec<FunctionStatement>,
+    pub superclass: Option<Expression>
 }
 
 #[derive(Debug, PartialEq, Clone)]

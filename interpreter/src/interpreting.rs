@@ -118,15 +118,35 @@ impl<'a> Interpreter<'a> {
                 };
                 return Err(EvaluationError::PotentiallyIllegalReturnStatement(ret));
             }
-            Statement::Class(class_statement) => {
-                self.environments
-                    .define(class_statement.name.clone(), Value::Nil);
+            Statement::Class(
+                stmt @ ClassStatement {
+                    name,
+                    methods,
+                    superclass,
+                },
+            ) => {
+                let mut superclass_id = None;
+                let enclosing_id = self.environments.curr;
 
-                let mut methods = HashMap::new();
+                self.environments.define(name.clone(), Value::Nil);
 
-                for method in &class_statement.methods {
-                    methods.insert(
-                        method.name.as_str(),
+                if let Some(superclass) = superclass {
+                    let value = self.evaluate(superclass)?;
+                    match value {
+                        Value::ClassIdentifier(id) => {
+                            superclass_id = Some(id);
+                            self.environments.start_new();
+                            self.environments.define("super".to_owned(), value);
+                        }
+                        _ => return Err(EvaluationError::SuperClassIsNotAClass),
+                    }
+                }
+
+                let mut scoped_methods = HashMap::new();
+
+                for method in methods {
+                    scoped_methods.insert(
+                        method.name.as_ref(),
                         Function {
                             stmt: &method,
                             env_id: self.environments.curr,
@@ -136,20 +156,22 @@ impl<'a> Interpreter<'a> {
                 }
 
                 let class = Class {
-                    stmt: class_statement,
-                    methods,
+                    stmt: stmt,
+                    methods: scoped_methods,
+                    superclass_id,
                 };
                 let class_id = Value::ClassIdentifier(self.classes.len());
                 self.classes.push(class);
-                self.environments
-                    .assign(&class_statement.name, class_id.clone(), Some(0))?;
+
+                self.environments.curr = enclosing_id;
+                self.environments.assign(&name, class_id.clone(), Some(0))?;
             }
         }
         Ok(())
     }
 
     fn evaluate(&mut self, expr: &'a Expression) -> Result<Value<'a>, EvaluationError<'a>> {
-        match expr.expr_type.as_ref() {
+        match &expr.expr_type {
             ExpressionType::LogicalOr(left, right) => {
                 let left = self.evaluate(&left)?;
                 if left.is_truthy() {
@@ -221,7 +243,7 @@ impl<'a> Interpreter<'a> {
                 Literal::Nil => Value::Nil,
             }),
             ExpressionType::Grouping(expression) => self.evaluate(&expression),
-            ExpressionType::Variable(name) => self.lookup(expr, name),
+            ExpressionType::Variable(name) => self.lookup(expr, &name),
             ExpressionType::Assign(name, value_expr) => {
                 let value = self.evaluate(&value_expr)?;
                 match self
@@ -243,17 +265,20 @@ impl<'a> Interpreter<'a> {
                 self.call(&callee, &args)
             }
             ExpressionType::Get { object, name } => {
-                let id = self.try_get_instance_id(object)?;
+                let id = self.try_get_instance_id(&object)?;
                 let instance = &self.instances[id];
 
                 if let Some(val) = instance.fields.get(name.as_str()) {
                     return Ok(val.clone());
                 }
 
-                let class = &self.classes[instance.class_id];
-
-                if let Some(func) = class.methods.get(name.as_str()) {
-                    let method = Self::bind(&mut self.environments, id, &func);
+                if let Some(id) = self.get_id_of_class_containing_method(instance.class_id, name) {
+                    let class = &self.classes[id];
+                    let method = Self::bind(
+                        &mut self.environments,
+                        id,
+                        &class.methods.get(name.as_str()).expect("get_id_of_class_containing_method should have returned the id of a class containing the method"),
+                    );
                     Ok(Value::Function(method))
                 } else {
                     Err(EvaluationError::UndefinedProperty)
@@ -264,15 +289,63 @@ impl<'a> Interpreter<'a> {
                 name,
                 value,
             } => {
-                let id = self.try_get_instance_id(object)?;
-                let value = self.evaluate(value)?;
+                let id = self.try_get_instance_id(&object)?;
+                let value = self.evaluate(&value)?;
                 let instance = &mut self.instances[id];
 
-                instance.fields.insert(name, value.clone());
+                instance.fields.insert(&name, value.clone());
                 Ok(value)
             }
             ExpressionType::This => self.lookup(expr, "this"),
+            ExpressionType::Super(name) => {
+                let distance = self
+                    .get_distance(expr)
+                    .expect("super cant exist in global scope");
+
+                let Value::ClassIdentifier(superclass_id) = self
+                    .environments
+                    .get("super", Some(distance))
+                    .expect("super should have been defined")
+                else {
+                    panic!("super should have been a class identifier");
+                };
+
+                let Value::InstanceIdentifier(instance_id) = self
+                    .environments
+                    .get("this", Some(distance - 1))
+                    .expect("this should have been defined")
+                else {
+                    panic!("this should have been an instance identifier");
+                };
+                let instance_id = *instance_id;
+
+                match self.get_id_of_class_containing_method(*superclass_id, name.as_str()) {
+                    Some(id) => {
+                        let class = &self.classes[id];
+                        let method = Self::bind(
+                        &mut self.environments,
+                        instance_id,
+                        &class.methods.get(name.as_str()).expect("get_id_of_class_containing_method should have returned the id of a class containing the method"),
+                    );
+                        Ok(Value::Function(method))
+                    }
+                    None => Err(EvaluationError::UndefinedProperty),
+                }
+            }
         }
+    }
+
+    fn get_id_of_class_containing_method(&self, class_id: usize, name: &str) -> Option<usize> {
+        let mut curr_id = Some(class_id);
+
+        while let Some(id) = curr_id {
+            let class = &self.classes[id];
+            if let Some(_) = class.methods.get(name) {
+                return Some(id);
+            }
+            curr_id = class.superclass_id
+        }
+        None
     }
 
     fn bind(envs: &mut Environments<'a>, instance_id: usize, func: &Function<'a>) -> Function<'a> {
@@ -423,6 +496,7 @@ pub enum Value<'a> {
 struct Class<'a> {
     stmt: &'a ClassStatement,
     methods: HashMap<&'a str, Function<'a>>,
+    superclass_id: Option<usize>,
 }
 
 struct Instance<'a> {
@@ -455,6 +529,7 @@ pub enum EvaluationError<'a> {
     PotentiallyIllegalReturnStatement(Value<'a>), // ;)
     IllegalPropertyAccessTarget,
     UndefinedProperty,
+    SuperClassIsNotAClass,
 }
 
 struct Environment<'a> {

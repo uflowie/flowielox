@@ -75,12 +75,35 @@ impl<'a> Resolver<'a> {
                 self.define(&function.name);
                 self.resolve_function(function, FunctionType::Function)?;
             }
-            Statement::Class(ClassStatement { name, methods }) => {
+            Statement::Class(ClassStatement {
+                name,
+                methods,
+                superclass,
+            }) => {
                 let enclosing = self.curr_class;
 
-                self.curr_class = ClassType::Class;
+                self.curr_class = match superclass {
+                    Some(_) => ClassType::Subclass,
+                    None => ClassType::Class,
+                };
                 self.declare(name)?;
                 self.define(name);
+
+                if let Some(
+                    expr @ Expression {
+                        expr_type: ExpressionType::Variable(super_name),
+                        ..
+                    },
+                ) = superclass
+                {
+                    if name == super_name {
+                        return Err(ResolverError::SelfInheritance);
+                    }
+                    self.resolve_expr(expr);
+
+                    self.scopes.push(HashMap::new());
+                    self.define("super");
+                }
 
                 self.scopes.push(HashMap::new());
 
@@ -92,6 +115,10 @@ impl<'a> Resolver<'a> {
                         _ => FunctionType::Method,
                     };
                     self.resolve_function(method, declaration)?;
+                }
+
+                if superclass.is_some() {
+                    self.scopes.pop();
                 }
 
                 self.scopes.pop();
@@ -117,7 +144,7 @@ impl<'a> Resolver<'a> {
     }
 
     fn resolve_expr(&mut self, expr: &Expression) -> Result<(), ResolverError> {
-        match expr.expr_type.as_ref() {
+        match &expr.expr_type {
             ExpressionType::Assign(name, expression) => {
                 self.resolve_expr(expression)?;
                 self.resolve_local(name, expr.id);
@@ -169,6 +196,12 @@ impl<'a> Resolver<'a> {
                     return Err(ResolverError::ThisOutsideOfClass);
                 }
                 self.resolve_local("this", expr.id);
+            }
+            ExpressionType::Super(_) => {
+                if self.curr_class != ClassType::Subclass {
+                    return Err(ResolverError::SuperOutsideOfSubclass);
+                }
+                self.resolve_local("super", expr.id);
             }
         }
         Ok(())
@@ -235,6 +268,8 @@ pub enum ResolverError {
     TopLevelReturn,
     ThisOutsideOfClass,
     ReturnInInitializer,
+    SelfInheritance,
+    SuperOutsideOfSubclass,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -249,4 +284,5 @@ enum FunctionType {
 enum ClassType {
     None,
     Class,
+    Subclass,
 }

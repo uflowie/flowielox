@@ -24,13 +24,14 @@ pub enum ExpressionType {
         value: Box<Expression>,
     },
     This,
+    Super(String),
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Expression {
     pub id: u32,
     pub line: Option<usize>, // option, because not every expression comes from source code, eg expressions created during desugaring
-    pub expr_type: Box<ExpressionType>,
+    pub expr_type: ExpressionType,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -126,6 +127,7 @@ impl Display for ExpressionType {
                 value,
             } => todo!(),
             Self::This => todo!(),
+            Self::Super(_) => todo!(),
         }
     }
 }
@@ -153,7 +155,7 @@ mod tests {
 
     fn make_expr_without_metadata(expr_type: ExpressionType) -> Box<Expression> {
         Box::new(Expression {
-            expr_type: Box::new(expr_type),
+            expr_type: expr_type,
             id: 0,
             line: None,
         })
