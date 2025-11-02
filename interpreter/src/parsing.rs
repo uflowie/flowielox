@@ -1,7 +1,7 @@
 use crate::{
     expressions::{BinaryOperator, Expression, ExpressionType, Literal, UnaryOperator},
     scanning::{Token, TokenType},
-    statements::Statement,
+    statements::{ClassStatement, FunctionStatement, FunctionType, Statement},
 };
 
 pub fn parse(tokens: &[Token]) -> Vec<Statement> {
@@ -37,11 +37,16 @@ impl Parser<'_> {
     }
 
     fn declaration(&mut self) -> Option<Statement> {
-        let statement = if let Some(TokenType::Var) = self.curr_token_type() {
-            self.advance();
-            self.var_declaration()
-        } else {
-            self.statement()
+        let statement = match self.curr_token_type() {
+            Some(TokenType::Var) => {
+                self.advance();
+                self.var_declaration()
+            }
+            Some(TokenType::Class) => {
+                self.advance();
+                self.class_declaration()
+            }
+            _ => self.statement(),
         };
 
         match statement {
@@ -72,6 +77,26 @@ impl Parser<'_> {
         Ok(Statement::Variable { name, initializer })
     }
 
+    fn class_declaration(&mut self) -> Result<Statement, ParsingError> {
+        let Some(TokenType::Identifier(name)) = self.curr_token_type() else {
+            return Err(self.unexpected_token("class name"));
+        };
+        let name = name.clone();
+        self.advance();
+
+        self.consume(TokenType::LeftBrace, "left brace before class body")?;
+
+        let mut methods = vec![];
+
+        while !self.is_at_end() && self.curr_token_type() != Some(&TokenType::RightBrace) {
+            methods.push(self.function(FunctionType::Method)?);
+        }
+
+        self.consume(TokenType::RightBrace, "right brace after class body")?;
+
+        Ok(Statement::Class(ClassStatement { name, methods }))
+    }
+
     fn statement(&mut self) -> Result<Statement, ParsingError> {
         match self.curr_token().map(|t| &t.token_type) {
             Some(TokenType::Print) => {
@@ -93,7 +118,7 @@ impl Parser<'_> {
             }
             Some(TokenType::Fun) => {
                 self.advance();
-                self.function()
+                Ok(Statement::Function(self.function(FunctionType::Function)?))
             }
             Some(TokenType::Return) => {
                 self.advance();
@@ -117,7 +142,7 @@ impl Parser<'_> {
         }
     }
 
-    fn function(&mut self) -> Result<Statement, ParsingError> {
+    fn function(&mut self, function_type: FunctionType) -> Result<FunctionStatement, ParsingError> {
         let Some(Token {
             token_type: TokenType::Identifier(name),
             ..
@@ -160,7 +185,12 @@ impl Parser<'_> {
         )?;
         let body = self.block()?;
 
-        Ok(Statement::Function { name, params, body })
+        Ok(FunctionStatement {
+            name,
+            params,
+            body,
+            function_type,
+        })
     }
 
     fn for_statement(&mut self) -> Result<Statement, ParsingError> {
@@ -274,16 +304,29 @@ impl Parser<'_> {
         if let Some(TokenType::Equal) = self.curr_token_type() {
             self.advance();
             let value = self.assignment()?;
+            let line = expr
+                .line
+                .expect("expression should have line in source code");
 
-            let ExpressionType::Variable(name) = *expr.expr_type else {
-                return Err(ParsingError::IllegalAssignmentTarget);
-            };
-
-            Ok(self.make_expr_with_line(
-                ExpressionType::Assign(name, Box::new(value)),
-                expr.line
-                    .expect("expression should have line in source code"),
-            ))
+            match *expr.expr_type {
+                ExpressionType::Variable(name) => {
+                    let assign = self
+                        .make_expr_with_line(ExpressionType::Assign(name, Box::new(value)), line);
+                    Ok(assign)
+                }
+                ExpressionType::Get { object, name } => {
+                    let set = self.make_expr_with_line(
+                        ExpressionType::Set {
+                            object,
+                            name,
+                            value: Box::new(value),
+                        },
+                        line,
+                    );
+                    Ok(set)
+                }
+                _ => Err(ParsingError::IllegalAssignmentTarget),
+            }
         } else {
             Ok(expr)
         }
@@ -477,6 +520,26 @@ impl Parser<'_> {
                     self.advance();
                     expr = self.finish_call(expr, line)?;
                 }
+                Some(Token {
+                    token_type: TokenType::Dot,
+                    line,
+                }) => {
+                    let line = *line;
+                    self.advance();
+
+                    let Some(TokenType::Identifier(name)) = self.curr_token_type() else {
+                        return Err(self.unexpected_token("property name after '.'"));
+                    };
+                    let name = name.clone();
+                    self.advance();
+                    expr = self.make_expr_with_line(
+                        ExpressionType::Get {
+                            object: Box::new(expr),
+                            name: name.clone(),
+                        },
+                        line,
+                    )
+                }
                 _ => {
                     break;
                 }
@@ -543,6 +606,10 @@ impl Parser<'_> {
                 self.advance();
                 Ok(self.make_expr_with_line(ExpressionType::Variable(name), line))
             }
+            TokenType::This => {
+                self.advance();
+                Ok(self.make_expr_with_line(ExpressionType::This, line))
+            }
             TokenType::LeftParen => {
                 self.advance();
                 let expr = self.expression()?;
@@ -572,11 +639,7 @@ impl Parser<'_> {
                 self.advance();
                 Ok(())
             }
-            _ => Err(ParsingError::UnexpectedToken(format!(
-                "{}, got {:?}",
-                error_msg.to_string(),
-                self.curr_token()
-            ))),
+            _ => Err(self.unexpected_token(error_msg)),
         }
     }
 

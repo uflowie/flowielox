@@ -18,10 +18,27 @@ pub enum Statement {
         condition: Expression,
         stmt: Box<Statement>,
     },
-    Function {
-        name: String,
-        params: Vec<String>,
-        body: Vec<Statement>,
-    },
+    Function(FunctionStatement),
+    Class(ClassStatement),
     Return(Option<Expression>),
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct FunctionStatement {
+    pub name: String,
+    pub params: Vec<String>,
+    pub body: Vec<Statement>,
+    pub function_type: FunctionType,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct ClassStatement {
+    pub name: String,
+    pub methods: Vec<FunctionStatement>,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum FunctionType {
+    Function,
+    Method,
 }

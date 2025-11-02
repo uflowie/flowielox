@@ -14,6 +14,16 @@ pub enum ExpressionType {
         callee: Box<Expression>,
         args: Vec<Expression>,
     },
+    Get {
+        object: Box<Expression>,
+        name: String,
+    },
+    Set {
+        object: Box<Expression>,
+        name: String,
+        value: Box<Expression>,
+    },
+    This,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -109,6 +119,13 @@ impl Display for ExpressionType {
             Self::LogicalOr(left, right) => write!(f, "({} or {})", left, right),
             Self::LogicalAnd(left, right) => write!(f, "({} and {})", left, right),
             Self::Call { callee, args } => write!(f, "({}({:?}))", callee, args),
+            Self::Get { object, name } => todo!(),
+            Self::Set {
+                object,
+                name,
+                value,
+            } => todo!(),
+            Self::This => todo!(),
         }
     }
 }

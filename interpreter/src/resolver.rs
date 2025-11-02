@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     expressions::{Expression, ExpressionType},
-    statements::Statement,
+    statements::{ClassStatement, FunctionStatement, Statement},
 };
 
 pub fn resolve(stmts: &[Statement]) -> Result<HashMap<u32, usize>, ResolverError> {
@@ -11,6 +11,7 @@ pub fn resolve(stmts: &[Statement]) -> Result<HashMap<u32, usize>, ResolverError
         scopes: vec![],
         resolved: HashMap::new(),
         curr_function: FunctionType::None,
+        curr_class: ClassType::None,
     };
     resolver.resolve()
 }
@@ -20,6 +21,7 @@ struct Resolver<'a> {
     scopes: Vec<HashMap<String, bool>>,
     resolved: HashMap<u32, usize>,
     curr_function: FunctionType,
+    curr_class: ClassType,
 }
 
 impl<'a> Resolver<'a> {
@@ -68,19 +70,47 @@ impl<'a> Resolver<'a> {
                 self.resolve_expr(condition)?;
                 self.resolve_stmt(stmt)?;
             }
-            Statement::Function { name, params, body } => {
+            Statement::Function(function) => {
+                self.declare(&function.name)?;
+                self.define(&function.name);
+                self.resolve_function(function, FunctionType::Function)?;
+            }
+            Statement::Class(ClassStatement { name, methods }) => {
+                let enclosing = self.curr_class;
+
+                self.curr_class = ClassType::Class;
                 self.declare(name)?;
                 self.define(name);
-                self.resolve_function(params, body)?;
-            }
-            Statement::Return(expression) => {
-                if self.curr_function == FunctionType::None {
-                    return Err(ResolverError::TopLevelReturn);
+
+                self.scopes.push(HashMap::new());
+
+                self.define("this");
+
+                for method in methods {
+                    let declaration = match method.name.as_str() {
+                        "init" => FunctionType::Initializer,
+                        _ => FunctionType::Method,
+                    };
+                    self.resolve_function(method, declaration)?;
                 }
 
-                if let Some(expression) = expression {
-                    self.resolve_expr(expression)?;
-                }
+                self.scopes.pop();
+
+                self.curr_class = enclosing;
+            }
+            Statement::Return(expression) => {
+                return match self.curr_function {
+                    FunctionType::None => Err(ResolverError::TopLevelReturn),
+                    FunctionType::Initializer if expression.is_some() => {
+                        Err(ResolverError::ReturnInInitializer)
+                    }
+                    _ => {
+                        if let Some(expr) = expression {
+                            self.resolve_expr(expr)?;
+                        }
+                        Ok(())
+                    }
+                };
             }
         }
         Ok(())
@@ -127,17 +157,31 @@ impl<'a> Resolver<'a> {
                     self.resolve_expr(expr)?;
                 }
             }
+            ExpressionType::Get { object, .. } => {
+                self.resolve_expr(object)?;
+            }
+            ExpressionType::Set { object, value, .. } => {
+                self.resolve_expr(&object)?;
+                self.resolve_expr(&value)?;
+            }
+            ExpressionType::This => {
+                if self.curr_class == ClassType::None {
+                    return Err(ResolverError::ThisOutsideOfClass);
+                }
+                self.resolve_local("this", expr.id);
+            }
         }
         Ok(())
     }
 
     fn resolve_function(
         &mut self,
-        params: &Vec<String>,
-        body: &Vec<Statement>,
+        function: &FunctionStatement,
+        function_type: FunctionType,
     ) -> Result<(), ResolverError> {
-        let enclosing = self.curr_function.clone();
-        self.curr_function = FunctionType::Function;
+        let FunctionStatement { params, body, .. } = function;
+        let enclosing = self.curr_function;
+        self.curr_function = function_type;
         self.scopes.push(HashMap::new());
 
         for param in params {
@@ -189,10 +233,20 @@ pub enum ResolverError {
     VariableReferencedInItsInitializer,
     VariableAlreadyDeclared,
     TopLevelReturn,
+    ThisOutsideOfClass,
+    ReturnInInitializer,
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
 enum FunctionType {
     None,
     Function,
+    Method,
+    Initializer,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum ClassType {
+    None,
+    Class,
 }

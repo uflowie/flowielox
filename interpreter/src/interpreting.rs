@@ -1,30 +1,26 @@
 use std::{
+    borrow::Cow,
     collections::HashMap,
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use crate::{
     expressions::{BinaryOperator, Expression, ExpressionType, Literal, UnaryOperator},
-    statements::Statement,
+    statements::{ClassStatement, FunctionStatement, Statement},
 };
 
-pub fn interpret(
-    statements: &[Statement],
-    resolved: &HashMap<u32, usize>,
-) -> Result<(), EvaluationError> {
-    let mut interpreter = Interpreter {
-        statements,
-        resolved,
-        environments: Environments::new(),
-    };
+pub fn interpret<'a>(
+    statements: &'a [Statement],
+    resolved: &'a HashMap<u32, usize>,
+) -> Result<(), EvaluationError<'a>> {
+    let mut interpreter = Interpreter::new(statements, resolved);
 
-    let global = &mut interpreter.environments;
-    global.define(String::from("clock"), Value::NativeFunction(|_| clock()));
+    interpreter.define_native_function("clock".to_owned(), |_| clock());
 
     interpreter.interpret()
 }
 
-fn clock() -> Value {
+fn clock() -> Value<'static> {
     Value::Number(
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -34,20 +30,34 @@ fn clock() -> Value {
 }
 
 struct Interpreter<'a> {
-    environments: Environments,
+    environments: Environments<'a>,
     statements: &'a [Statement],
     resolved: &'a HashMap<u32, usize>,
+    instances: Vec<Instance<'a>>,
+    classes: Vec<Class<'a>>,
+    native_functions: Vec<fn(&[Value<'a>]) -> Value<'a>>,
 }
 
 impl<'a> Interpreter<'a> {
-    fn interpret(mut self) -> Result<(), EvaluationError> {
+    fn new(statements: &'a [Statement], resolved: &'a HashMap<u32, usize>) -> Self {
+        Self {
+            statements,
+            resolved,
+            environments: Environments::new(),
+            instances: vec![],
+            classes: vec![],
+            native_functions: vec![],
+        }
+    }
+
+    fn interpret(mut self) -> Result<(), EvaluationError<'a>> {
         for statement in self.statements {
             self.execute(statement)?;
         }
         Ok(())
     }
 
-    fn execute(&mut self, statement: &Statement) -> Result<(), EvaluationError> {
+    fn execute(&mut self, statement: &'a Statement) -> Result<(), EvaluationError<'a>> where {
         match statement {
             Statement::Expression(expr) => {
                 self.evaluate(expr)?;
@@ -91,14 +101,14 @@ impl<'a> Interpreter<'a> {
                     self.execute(stmt)?
                 }
             }
-            Statement::Function { name, params, body } => {
+            Statement::Function(stmt) => {
                 self.environments.define(
-                    name.clone(),
-                    Value::Function {
+                    stmt.name.clone(),
+                    Value::Function(Function {
                         env_id: self.environments.curr,
-                        params: params.clone(),
-                        body: body.clone(),
-                    },
+                        stmt,
+                        is_initializer: false,
+                    }),
                 );
             }
             Statement::Return(expr) => {
@@ -108,11 +118,37 @@ impl<'a> Interpreter<'a> {
                 };
                 return Err(EvaluationError::PotentiallyIllegalReturnStatement(ret));
             }
+            Statement::Class(class_statement) => {
+                self.environments
+                    .define(class_statement.name.clone(), Value::Nil);
+
+                let mut methods = HashMap::new();
+
+                for method in &class_statement.methods {
+                    methods.insert(
+                        method.name.as_str(),
+                        Function {
+                            stmt: &method,
+                            env_id: self.environments.curr,
+                            is_initializer: method.name == "init",
+                        },
+                    );
+                }
+
+                let class = Class {
+                    stmt: class_statement,
+                    methods,
+                };
+                let class_id = Value::ClassIdentifier(self.classes.len());
+                self.classes.push(class);
+                self.environments
+                    .assign(&class_statement.name, class_id.clone(), Some(0))?;
+            }
         }
         Ok(())
     }
 
-    fn evaluate(&mut self, expr: &Expression) -> Result<Value, EvaluationError> {
+    fn evaluate(&mut self, expr: &'a Expression) -> Result<Value<'a>, EvaluationError<'a>> {
         match expr.expr_type.as_ref() {
             ExpressionType::LogicalOr(left, right) => {
                 let left = self.evaluate(&left)?;
@@ -149,10 +185,9 @@ impl<'a> Interpreter<'a> {
                         Ok(Value::Number(left + right))
                     }
                     (BinaryOperator::Plus, Value::String(left), Value::String(right)) => {
-                        Ok(Value::String(left + &right))
-                    }
-                    (BinaryOperator::Minus, Value::String(left), Value::String(right)) => {
-                        Ok(Value::String(left + &right))
+                        let mut concatenated = left.into_owned();
+                        concatenated.push_str(right.as_ref());
+                        Ok(Value::String(Cow::Owned(concatenated)))
                     }
                     (BinaryOperator::Star, Value::Number(left), Value::Number(right)) => {
                         Ok(Value::Number(left * right))
@@ -180,22 +215,18 @@ impl<'a> Interpreter<'a> {
                 }
             }
             ExpressionType::Literal(literal) => Ok(match literal {
-                Literal::String(s) => Value::String(s.clone()),
+                Literal::String(s) => Value::String(Cow::Owned(s.clone())),
                 Literal::Number(num) => Value::Number(*num),
                 Literal::Boolean(b) => Value::Boolean(*b),
                 Literal::Nil => Value::Nil,
             }),
             ExpressionType::Grouping(expression) => self.evaluate(&expression),
-            ExpressionType::Variable(name) => self
-                .environments
-                .get(&name, self.get_distance(expr))
-                .cloned()
-                .ok_or(EvaluationError::UndefinedVariable),
+            ExpressionType::Variable(name) => self.lookup(expr, name),
             ExpressionType::Assign(name, value_expr) => {
                 let value = self.evaluate(&value_expr)?;
                 match self
                     .environments
-                    .assign(&name, &value, self.get_distance(expr))
+                    .assign(&name, value.clone(), self.get_distance(expr))
                 {
                     Ok(()) => Ok(value),
                     Err(err) => Err(err),
@@ -211,17 +242,84 @@ impl<'a> Interpreter<'a> {
 
                 self.call(&callee, &args)
             }
+            ExpressionType::Get { object, name } => {
+                let id = self.try_get_instance_id(object)?;
+                let instance = &self.instances[id];
+
+                if let Some(val) = instance.fields.get(name.as_str()) {
+                    return Ok(val.clone());
+                }
+
+                let class = &self.classes[instance.class_id];
+
+                if let Some(func) = class.methods.get(name.as_str()) {
+                    let method = Self::bind(&mut self.environments, id, &func);
+                    Ok(Value::Function(method))
+                } else {
+                    Err(EvaluationError::UndefinedProperty)
+                }
+            }
+            ExpressionType::Set {
+                object,
+                name,
+                value,
+            } => {
+                let id = self.try_get_instance_id(object)?;
+                let value = self.evaluate(value)?;
+                let instance = &mut self.instances[id];
+
+                instance.fields.insert(name, value.clone());
+                Ok(value)
+            }
+            ExpressionType::This => self.lookup(expr, "this"),
         }
     }
 
-    fn call(&mut self, callee: &Value, args: &[Value]) -> Result<Value, EvaluationError> {
+    fn bind(envs: &mut Environments<'a>, instance_id: usize, func: &Function<'a>) -> Function<'a> {
+        let original_env = envs.curr;
+
+        envs.curr = func.env_id;
+        envs.start_new();
+        envs.define("this".to_owned(), Value::InstanceIdentifier(instance_id));
+
+        let method = Function {
+            env_id: envs.curr,
+            stmt: func.stmt,
+            is_initializer: func.is_initializer,
+        };
+
+        envs.curr = original_env;
+
+        method
+    }
+
+    fn lookup(&self, expr: &Expression, name: &str) -> Result<Value<'a>, EvaluationError<'a>> {
+        self.environments
+            .get(&name, self.get_distance(expr))
+            .cloned()
+            .ok_or(EvaluationError::UndefinedVariable)
+    }
+
+    fn try_get_instance_id(&mut self, expr: &'a Expression) -> Result<usize, EvaluationError<'a>> {
+        match self.evaluate(expr)? {
+            Value::InstanceIdentifier(id) => Ok(id),
+            _ => Err(EvaluationError::IllegalPropertyAccessTarget),
+        }
+    }
+
+    fn call(
+        &mut self,
+        callee: &Value<'a>,
+        args: &[Value<'a>],
+    ) -> Result<Value<'a>, EvaluationError<'a>> {
         match callee {
-            Value::NativeFunction(func) => Ok(func(args)),
-            Value::Function {
-                params,
-                body,
+            Value::Function(Function {
                 env_id,
-            } => {
+                stmt,
+                is_initializer,
+            }) => {
+                let FunctionStatement { params, body, .. } = stmt;
+
                 if params.len() != args.len() {
                     return Err(EvaluationError::InvalidNumberOfArgumentsPassed);
                 }
@@ -235,10 +333,18 @@ impl<'a> Interpreter<'a> {
                 }
 
                 for stmt in body {
-                    match self.execute(stmt) {
+                    match self.execute(&stmt) {
                         Err(EvaluationError::PotentiallyIllegalReturnStatement(val)) => {
+                            let result = if *is_initializer {
+                                self.environments
+                                    .get("this", Some(1)) // Some(1) to walk back out of the execution scope of the function into its closure
+                                    .cloned()
+                                    .expect("'this' should be defined in initializer")
+                            } else {
+                                val
+                            };
                             self.environments.curr = old_env_id;
-                            return Ok(val);
+                            return Ok(result);
                         }
                         Err(err) => {
                             self.environments.curr = old_env_id;
@@ -248,8 +354,39 @@ impl<'a> Interpreter<'a> {
                     }
                 }
 
+                let result = if *is_initializer {
+                    self.environments
+                        .get("this", Some(1))
+                        .cloned()
+                        .expect("'this' should be defined in initializer")
+                } else {
+                    Value::Nil
+                };
                 self.environments.curr = old_env_id;
-                Ok(Value::Nil)
+
+                Ok(result)
+            }
+            Value::ClassIdentifier(id) => {
+                let instance = Instance {
+                    class_id: *id,
+                    fields: HashMap::new(),
+                };
+
+                let instance_id = self.instances.len();
+                self.instances.push(instance);
+
+                let class = &self.classes[*id];
+
+                if let Some(initializer) = class.methods.get("init") {
+                    let method = Self::bind(&mut self.environments, instance_id, &initializer);
+                    self.call(&Value::Function(method), args)?;
+                }
+
+                Ok(Value::InstanceIdentifier(instance_id))
+            }
+            Value::NativeFunctionIdentifier(id) => {
+                let native_func = self.native_functions[*id];
+                Ok(native_func(args))
             }
             _ => Err(EvaluationError::InvalidCalleeType),
         }
@@ -258,23 +395,49 @@ impl<'a> Interpreter<'a> {
     fn get_distance(&self, expr: &Expression) -> Option<usize> {
         self.resolved.get(&expr.id).copied()
     }
+
+    fn define_native_function(&mut self, name: String, function: fn(&[Value<'a>]) -> Value<'a>) {
+        self.environments.define(
+            name,
+            Value::NativeFunctionIdentifier(self.native_functions.len()),
+        );
+        self.native_functions.push(function);
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub enum Value {
+pub enum Value<'a> {
     Number(f64),
-    String(String),
+    String(Cow<'a, str>),
     Boolean(bool),
     Nil,
-    NativeFunction(fn(&[Value]) -> Value),
-    Function {
-        env_id: usize,
-        params: Vec<String>,
-        body: Vec<Statement>,
-    },
+    Function(Function<'a>),
+    // we use an identifier here because class instances need a reference to their class. a reference to the class statement is not enough
+    // because the class statement doesn't capture the closure of the class.
+    ClassIdentifier(usize),
+    NativeFunctionIdentifier(usize), // we use an identifier here to avoid PartialEq warnings when using the fn pointer directly
+    InstanceIdentifier(usize), // we use an identifier here to allow for mutability of instances without RefCell
 }
 
-impl Value {
+#[derive(Debug, PartialEq, Clone)]
+struct Class<'a> {
+    stmt: &'a ClassStatement,
+    methods: HashMap<&'a str, Function<'a>>,
+}
+
+struct Instance<'a> {
+    class_id: usize,
+    fields: HashMap<&'a str, Value<'a>>,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct Function<'a> {
+    env_id: usize,
+    stmt: &'a FunctionStatement,
+    is_initializer: bool,
+}
+
+impl Value<'_> {
     fn is_truthy(&self) -> bool {
         match self {
             Value::Boolean(false) | Value::Nil => false,
@@ -284,20 +447,22 @@ impl Value {
 }
 
 #[derive(Debug)]
-pub enum EvaluationError {
+pub enum EvaluationError<'a> {
     TypeMismatch,
     UndefinedVariable,
     InvalidCalleeType,
     InvalidNumberOfArgumentsPassed,
-    PotentiallyIllegalReturnStatement(Value), // ;)
+    PotentiallyIllegalReturnStatement(Value<'a>), // ;)
+    IllegalPropertyAccessTarget,
+    UndefinedProperty,
 }
 
-struct Environment {
+struct Environment<'a> {
     parent_id: Option<usize>,
-    values: HashMap<String, Value>,
+    values: HashMap<String, Value<'a>>,
 }
 
-impl Environment {
+impl Environment<'_> {
     fn new(parent_id: usize) -> Self {
         Self {
             parent_id: Some(parent_id),
@@ -313,12 +478,12 @@ impl Environment {
     }
 }
 
-struct Environments {
+struct Environments<'a> {
     curr: usize,
-    envs: Vec<Environment>,
+    envs: Vec<Environment<'a>>,
 }
 
-impl Environments {
+impl<'a> Environments<'a> {
     fn new() -> Self {
         Self {
             curr: 0,
@@ -326,16 +491,16 @@ impl Environments {
         }
     }
 
-    fn define(&mut self, key: String, value: Value) {
+    fn define(&mut self, key: String, value: Value<'a>) {
         self.envs[self.curr].values.insert(key, value);
     }
 
     fn assign(
         &mut self,
         key: &str,
-        value: &Value,
+        value: Value<'a>,
         dist: Option<usize>,
-    ) -> Result<(), EvaluationError> {
+    ) -> Result<(), EvaluationError<'a>> {
         let id = self
             .get_id_of_ancestor(dist)
             .ok_or(EvaluationError::UndefinedVariable)?;
@@ -344,11 +509,11 @@ impl Environments {
             "find should have returned the id of an environment that contains the given key",
         );
 
-        *slot = value.clone();
+        *slot = value;
         Ok(())
     }
 
-    fn get(&self, key: &str, dist: Option<usize>) -> Option<&Value> {
+    fn get(&self, key: &str, dist: Option<usize>) -> Option<&Value<'a>> {
         let id = self.get_id_of_ancestor(dist)?;
         self.envs[id].values.get(key)
     }
