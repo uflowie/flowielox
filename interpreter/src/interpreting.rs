@@ -57,7 +57,7 @@ impl<'a> Interpreter<'a> {
         Ok(())
     }
 
-    fn execute(&mut self, statement: &'a Statement) -> Result<(), EvaluationError<'a>> where {
+    fn execute(&mut self, statement: &'a Statement) -> Result<(), EvaluationError<'a>> {
         match statement {
             Statement::Expression(expr) => {
                 self.evaluate(expr)?;
@@ -217,9 +217,7 @@ impl<'a> Interpreter<'a> {
                     (BinaryOperator::Slash, Value::Number(left), Value::Number(right)) => {
                         Ok(Value::Number(left / right))
                     }
-                    (BinaryOperator::BangEqual, Value::Boolean(left), Value::Boolean(right)) => {
-                        Ok(Value::Boolean(left != right))
-                    }
+                    (BinaryOperator::BangEqual, left, right) => Ok(Value::Boolean(left != right)),
                     (BinaryOperator::EqualEqual, left, right) => Ok(Value::Boolean(left == right)),
                     (BinaryOperator::Greater, Value::Number(left), Value::Number(right)) => {
                         Ok(Value::Boolean(left > right))
@@ -237,7 +235,7 @@ impl<'a> Interpreter<'a> {
                 }
             }
             ExpressionType::Literal(literal) => Ok(match literal {
-                Literal::String(s) => Value::String(Cow::Owned(s.clone())),
+                Literal::String(s) => Value::String(Cow::Borrowed(&s)),
                 Literal::Number(num) => Value::Number(*num),
                 Literal::Boolean(b) => Value::Boolean(*b),
                 Literal::Nil => Value::Nil,
