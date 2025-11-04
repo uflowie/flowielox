@@ -265,18 +265,20 @@ impl<'a> Interpreter<'a> {
                 self.call(&callee, &args)
             }
             ExpressionType::Get { object, name } => {
-                let id = self.try_get_instance_id(&object)?;
-                let instance = &self.instances[id];
+                let instance_id = self.try_get_instance_id(&object)?;
+                let instance = &self.instances[instance_id];
 
                 if let Some(val) = instance.fields.get(name.as_str()) {
                     return Ok(val.clone());
                 }
 
-                if let Some(id) = self.get_id_of_class_containing_method(instance.class_id, name) {
-                    let class = &self.classes[id];
+                if let Some(class_id) =
+                    self.get_id_of_class_containing_method(instance.class_id, name)
+                {
+                    let class = &self.classes[class_id];
                     let method = Self::bind(
                         &mut self.environments,
-                        id,
+                        instance_id,
                         &class.methods.get(name.as_str()).expect("get_id_of_class_containing_method should have returned the id of a class containing the method"),
                     );
                     Ok(Value::Function(method))
