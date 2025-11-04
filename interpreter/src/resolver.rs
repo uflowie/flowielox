@@ -99,7 +99,7 @@ impl<'a> Resolver<'a> {
                     if name == super_name {
                         return Err(ResolverError::SelfInheritance);
                     }
-                    self.resolve_expr(expr);
+                    self.resolve_expr(expr)?;
 
                     self.scopes.push(HashMap::new());
                     self.define("super");

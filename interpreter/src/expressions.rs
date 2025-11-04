@@ -116,18 +116,27 @@ impl Display for ExpressionType {
             }
             Self::Literal(literal) => write!(f, "{}", literal),
             Self::Grouping(expression) => write!(f, "(group {})", expression),
-            Self::Variable(_) => todo!(),
+            Self::Variable(name) => write!(f, "{}", name),
             Self::LogicalOr(left, right) => write!(f, "({} or {})", left, right),
             Self::LogicalAnd(left, right) => write!(f, "({} and {})", left, right),
-            Self::Call { callee, args } => write!(f, "({}({:?}))", callee, args),
-            Self::Get { object, name } => todo!(),
+            Self::Call { callee, args } => {
+                write!(f, "({}(", callee)?;
+                for (index, arg) in args.iter().enumerate() {
+                    if index > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", arg)?;
+                }
+                write!(f, "))")
+            }
+            Self::Get { object, name } => write!(f, "{}.{}", object, name),
             Self::Set {
                 object,
                 name,
                 value,
-            } => todo!(),
-            Self::This => todo!(),
-            Self::Super(_) => todo!(),
+            } => write!(f, "({}.{} = {})", object, name, value),
+            Self::This => write!(f, "this"),
+            Self::Super(method) => write!(f, "super.{}", method),
         }
     }
 }
