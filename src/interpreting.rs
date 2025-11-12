@@ -1,6 +1,7 @@
 use std::{
     borrow::Cow,
     collections::HashMap,
+    fmt::Display,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -15,7 +16,7 @@ pub fn interpret<'a>(
 ) -> Result<(), EvaluationError<'a>> {
     let mut interpreter = Interpreter::new(statements, resolved);
 
-    interpreter.define_native_function("clock".to_owned(), |_| clock());
+    interpreter.define_native_function("clock", |_| clock());
 
     interpreter.interpret()
 }
@@ -35,7 +36,7 @@ struct Interpreter<'a> {
     resolved: &'a HashMap<u32, usize>,
     instances: Vec<Instance<'a>>,
     classes: Vec<Class<'a>>,
-    native_functions: Vec<fn(&[Value<'a>]) -> Value<'a>>,
+    native_functions: Vec<NativeFunction<'a>>,
 }
 
 impl<'a> Interpreter<'a> {
@@ -64,7 +65,30 @@ impl<'a> Interpreter<'a> {
             }
             Statement::Print(expr) => {
                 let value = self.evaluate(expr)?;
-                println!("{:?}", value);
+                let text: Cow<'a, str> = match value {
+                    Value::Number(value) => {
+                        if value.fract() == 0.0 {
+                            Cow::Owned((value.trunc() as i64).to_string())
+                        } else {
+                            Cow::Owned(value.to_string())
+                        }
+                    }
+                    Value::String(value) => value,
+                    Value::Boolean(value) => Cow::Owned(value.to_string()),
+                    Value::Nil => Cow::Borrowed("nil"),
+                    Value::Function(value) => Cow::Owned(format!("<fn {}>", value.stmt.name)),
+                    Value::ClassIdentifier(id) => Cow::Borrowed(&self.classes[id].stmt.name),
+                    Value::NativeFunctionIdentifier(id) => {
+                        Cow::Borrowed(self.native_functions[id].name)
+                    }
+                    Value::InstanceIdentifier(id) => {
+                        let instance = &self.instances[id];
+                        let class = &self.classes[instance.class_id];
+                        Cow::Owned(format!("{} instance", class.stmt.name))
+                    }
+                };
+
+                println!("{}", text);
             }
             Statement::Variable { name, initializer } => {
                 let value = match initializer {
@@ -281,7 +305,7 @@ impl<'a> Interpreter<'a> {
                     );
                     Ok(Value::Function(method))
                 } else {
-                    Err(EvaluationError::UndefinedProperty)
+                    Err(EvaluationError::UndefinedProperty(name))
                 }
             }
             ExpressionType::Set {
@@ -329,7 +353,7 @@ impl<'a> Interpreter<'a> {
                     );
                         Ok(Value::Function(method))
                     }
-                    None => Err(EvaluationError::UndefinedProperty),
+                    None => Err(EvaluationError::UndefinedProperty(&name)),
                 }
             }
         }
@@ -394,7 +418,10 @@ impl<'a> Interpreter<'a> {
                 let FunctionStatement { params, body, .. } = stmt;
 
                 if params.len() != args.len() {
-                    return Err(EvaluationError::InvalidNumberOfArgumentsPassed);
+                    return Err(EvaluationError::InvalidNumberOfArgumentsPassed {
+                        expected: params.len(),
+                        received: args.len(),
+                    });
                 }
 
                 let old_env_id = self.environments.curr;
@@ -458,8 +485,8 @@ impl<'a> Interpreter<'a> {
                 Ok(Value::InstanceIdentifier(instance_id))
             }
             Value::NativeFunctionIdentifier(id) => {
-                let native_func = self.native_functions[*id];
-                Ok(native_func(args))
+                let native_func = &self.native_functions[*id];
+                Ok((native_func.func)(args))
             }
             _ => Err(EvaluationError::InvalidCalleeType),
         }
@@ -469,12 +496,12 @@ impl<'a> Interpreter<'a> {
         self.resolved.get(&expr.id).copied()
     }
 
-    fn define_native_function(&mut self, name: String, function: fn(&[Value<'a>]) -> Value<'a>) {
+    fn define_native_function(&mut self, name: &'a str, func: fn(&[Value<'a>]) -> Value<'a>) {
         self.environments.define(
-            name,
+            name.to_owned(),
             Value::NativeFunctionIdentifier(self.native_functions.len()),
         );
-        self.native_functions.push(function);
+        self.native_functions.push(NativeFunction { name, func });
     }
 }
 
@@ -511,6 +538,11 @@ pub struct Function<'a> {
     is_initializer: bool,
 }
 
+struct NativeFunction<'a> {
+    name: &'a str,
+    func: fn(&[Value<'a>]) -> Value<'a>,
+}
+
 impl Value<'_> {
     fn is_truthy(&self) -> bool {
         match self {
@@ -525,10 +557,10 @@ pub enum EvaluationError<'a> {
     TypeMismatch,
     UndefinedVariable,
     InvalidCalleeType,
-    InvalidNumberOfArgumentsPassed,
+    InvalidNumberOfArgumentsPassed { expected: usize, received: usize },
     PotentiallyIllegalReturnStatement(Value<'a>), // ;)
     IllegalPropertyAccessTarget,
-    UndefinedProperty,
+    UndefinedProperty(&'a str),
     SuperClassIsNotAClass,
 }
 
@@ -618,6 +650,25 @@ impl<'a> Environments<'a> {
                 curr_id
             }
             None => Some(0),
+        }
+    }
+}
+
+impl<'a> Display for EvaluationError<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EvaluationError::TypeMismatch => todo!(),
+            EvaluationError::UndefinedVariable => todo!(),
+            EvaluationError::InvalidCalleeType => write!(f, "Can only call functions and classes."),
+            EvaluationError::InvalidNumberOfArgumentsPassed { expected, received } => {
+                write!(f, "Expected {} arguments but got {}.", expected, received)
+            }
+            EvaluationError::PotentiallyIllegalReturnStatement(value) => todo!(),
+            EvaluationError::IllegalPropertyAccessTarget => todo!(),
+            EvaluationError::UndefinedProperty(property) => {
+                write!(f, "Undefined property '{}'.", property)
+            }
+            EvaluationError::SuperClassIsNotAClass => todo!(),
         }
     }
 }

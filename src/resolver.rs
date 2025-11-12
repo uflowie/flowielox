@@ -1,11 +1,11 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Display};
 
 use crate::{
     expressions::{Expression, ExpressionType},
     statements::{ClassStatement, FunctionStatement, Statement},
 };
 
-pub fn resolve(stmts: &[Statement]) -> Result<HashMap<u32, usize>, ResolverError> {
+pub fn resolve(stmts: &[Statement]) -> Result<HashMap<u32, usize>, ResolverErrorType> {
     let resolver = Resolver {
         stmts,
         scopes: vec![],
@@ -25,7 +25,7 @@ struct Resolver<'a> {
 }
 
 impl<'a> Resolver<'a> {
-    fn resolve(mut self) -> Result<HashMap<u32, usize>, ResolverError> {
+    fn resolve(mut self) -> Result<HashMap<u32, usize>, ResolverErrorType> {
         for stmt in self.stmts {
             self.resolve_stmt(stmt)?;
         }
@@ -33,7 +33,7 @@ impl<'a> Resolver<'a> {
         Ok(self.resolved)
     }
 
-    fn resolve_stmt(&mut self, stmt: &Statement) -> Result<(), ResolverError> {
+    fn resolve_stmt(&mut self, stmt: &Statement) -> Result<(), ResolverErrorType> {
         match stmt {
             Statement::Expression(expression) => self.resolve_expr(expression)?,
             Statement::Print(expression) => self.resolve_expr(expression)?,
@@ -97,7 +97,7 @@ impl<'a> Resolver<'a> {
                 ) = superclass
                 {
                     if name == super_name {
-                        return Err(ResolverError::SelfInheritance);
+                        return Err(ResolverErrorType::SelfInheritance);
                     }
                     self.resolve_expr(expr)?;
 
@@ -127,9 +127,9 @@ impl<'a> Resolver<'a> {
             }
             Statement::Return(expression) => {
                 return match self.curr_function {
-                    FunctionType::None => Err(ResolverError::TopLevelReturn),
+                    FunctionType::None => Err(ResolverErrorType::TopLevelReturn),
                     FunctionType::Initializer if expression.is_some() => {
-                        Err(ResolverError::ReturnInInitializer)
+                        Err(ResolverErrorType::ReturnInInitializer)
                     }
                     _ => {
                         if let Some(expr) = expression {
@@ -143,7 +143,7 @@ impl<'a> Resolver<'a> {
         Ok(())
     }
 
-    fn resolve_expr(&mut self, expr: &Expression) -> Result<(), ResolverError> {
+    fn resolve_expr(&mut self, expr: &Expression) -> Result<(), ResolverErrorType> {
         match &expr.expr_type {
             ExpressionType::Assign(name, expression) => {
                 self.resolve_expr(expression)?;
@@ -172,7 +172,7 @@ impl<'a> Resolver<'a> {
                     .flatten()
                     .is_some_and(|x| !x)
                 {
-                    return Err(ResolverError::VariableReferencedInItsInitializer);
+                    return Err(ResolverErrorType::VariableReferencedInItsInitializer);
                 }
 
                 self.resolve_local(name, expr.id);
@@ -193,16 +193,15 @@ impl<'a> Resolver<'a> {
             }
             ExpressionType::This => {
                 if self.curr_class == ClassType::None {
-                    return Err(ResolverError::ThisOutsideOfClass);
+                    return Err(ResolverErrorType::ThisOutsideOfClass);
                 }
                 self.resolve_local("this", expr.id);
             }
-            ExpressionType::Super(_) => {
-                if self.curr_class != ClassType::Subclass {
-                    return Err(ResolverError::SuperOutsideOfSubclass);
-                }
-                self.resolve_local("super", expr.id);
-            }
+            ExpressionType::Super(_) => match self.curr_class {
+                ClassType::None => return Err(ResolverErrorType::SuperOutsideOfClass),
+                ClassType::Class => return Err(ResolverErrorType::SuperOutsideOfSubclass),
+                ClassType::Subclass => self.resolve_local("super", expr.id),
+            },
         }
         Ok(())
     }
@@ -211,7 +210,7 @@ impl<'a> Resolver<'a> {
         &mut self,
         function: &FunctionStatement,
         function_type: FunctionType,
-    ) -> Result<(), ResolverError> {
+    ) -> Result<(), ResolverErrorType> {
         let FunctionStatement { params, body, .. } = function;
         let enclosing = self.curr_function;
         self.curr_function = function_type;
@@ -232,10 +231,10 @@ impl<'a> Resolver<'a> {
         Ok(())
     }
 
-    fn declare(&mut self, name: &str) -> Result<(), ResolverError> {
+    fn declare(&mut self, name: &str) -> Result<(), ResolverErrorType> {
         if let Some(scope) = self.scopes.last_mut() {
             if scope.contains_key(name) {
-                return Err(ResolverError::VariableAlreadyDeclared);
+                return Err(ResolverErrorType::VariableAlreadyDeclared);
             }
             scope.insert(name.to_string(), false);
         }
@@ -261,8 +260,13 @@ impl<'a> Resolver<'a> {
     }
 }
 
+pub struct ResolverError {
+    pub error_type: ResolverErrorType,
+    pub line: usize,
+}
+
 #[derive(Debug)]
-pub enum ResolverError {
+pub enum ResolverErrorType {
     VariableReferencedInItsInitializer,
     VariableAlreadyDeclared,
     TopLevelReturn,
@@ -270,6 +274,28 @@ pub enum ResolverError {
     ReturnInInitializer,
     SelfInheritance,
     SuperOutsideOfSubclass,
+    SuperOutsideOfClass,
+}
+
+impl Display for ResolverErrorType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ResolverErrorType::VariableReferencedInItsInitializer => todo!(),
+            ResolverErrorType::VariableAlreadyDeclared => todo!(),
+            ResolverErrorType::TopLevelReturn => todo!(),
+            ResolverErrorType::ThisOutsideOfClass => {
+                f.write_str("Can't use 'this' outside of a class.")
+            }
+            ResolverErrorType::ReturnInInitializer => todo!(),
+            ResolverErrorType::SelfInheritance => todo!(),
+            ResolverErrorType::SuperOutsideOfSubclass => {
+                f.write_str("Can't use 'super' in a class with no superclass.")
+            }
+            ResolverErrorType::SuperOutsideOfClass => {
+                f.write_str("Can't use 'super' outside of a class.")
+            }
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq)]

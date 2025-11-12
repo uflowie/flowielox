@@ -25,12 +25,16 @@ ENV PATH="/usr/local/dart-sdk/bin:/root/.cargo/bin:${PATH}"
 
 WORKDIR /app
 
+RUN git clone https://github.com/munificent/craftinginterpreters.git
+
+RUN cd craftinginterpreters/tool && dart pub get
+
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 
 RUN cargo build --release \
     && cp target/release/interpreter /app/interpreter
 
-RUN git clone https://github.com/munificent/craftinginterpreters.git
+WORKDIR /app/craftinginterpreters
 
-RUN cd craftinginterpreters/tool && dart pub get
+ENTRYPOINT [ "dart", "tool/bin/test.dart", "jlox", "--interpreter", "../interpreter" ]

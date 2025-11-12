@@ -2,6 +2,7 @@ use std::{
     env::args,
     fs::read_to_string,
     io::{Write, stdin, stdout},
+    process::exit,
 };
 mod expressions;
 mod interpreting;
@@ -50,6 +51,18 @@ fn run(program: &str) {
     };
 
     let statements = parse(&tokens);
-    let resolved = resolve(&statements).unwrap();
-    interpret(&statements, &resolved).unwrap();
+    let resolved = resolve(&statements);
+
+    let Ok(resolved) = resolved else {
+        eprintln!("{}", resolved.unwrap_err());
+        exit(65);
+    };
+
+    let result = interpret(&statements, &resolved);
+
+    if let Err(err) = result {
+        eprintln!("{}", err);
+        // eprintln!("");
+        exit(70);
+    }
 }
